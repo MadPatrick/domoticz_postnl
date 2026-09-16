@@ -503,6 +503,11 @@ class BasePlugin:
         text_out = "\n".join(sent_lines) or "Geen verzonden pakketten"
         Devices[UNIT_SENT].Update(nValue=0, sValue=text_out[:400])
 
+        upcoming = sorted(active, key=lambda e: e["from"] or "")[:MAX_TEXT_LINES]
+        upcoming_lines = [self.format_line(e) for e in upcoming]
+        text_upcoming = "\n".join(upcoming_lines) or "Geen pakketten onderweg"
+        Devices[UNIT_UPCOMING].Update(nValue=len(active), sValue=text_upcoming[:400])
+
         today = time.strftime("%Y-%m-%d")
         delivered_today = any(
             e["status"] == "Delivered" and e["deliveryDate"].startswith(today) for e in receiver
@@ -563,6 +568,8 @@ class BasePlugin:
             Domoticz.Device(Name="Verzonden pakketten", Unit=UNIT_SENT, TypeName="Text").Create()
         if UNIT_DELIVERED_TODAY not in Devices:
             Domoticz.Device(Name="Vandaag bezorgd", Unit=UNIT_DELIVERED_TODAY, TypeName="Switch").Create()
+        if UNIT_UPCOMING not in Devices:
+            Domoticz.Device(Name="Aankomende pakketten", Unit=UNIT_UPCOMING, TypeName="Text").Create()
 
         self.load_refresh_token()
 
