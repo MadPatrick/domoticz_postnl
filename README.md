@@ -9,11 +9,12 @@ en toont inkomende/verzonden zendingen (Track & Trace) als Domoticz-devices.
 Na installatie verschijnen 5 devices:
 
 - **Aantal onderweg** — teller met het aantal inkomende pakketten dat nog niet bezorgd/retour is.
-- **Bezorgde pakketten** — tekstregel per pakket dat de laatste 2 dagen is bezorgd, met datum/tijd
-  (max. 10 regels, nieuwste eerst).
-- **Aankomende pakketten** — alleen de pakketten die nog onderweg zijn, met datum en tijdvenster,
-  gesorteerd op wanneer ze worden verwacht.
-- **Verzonden pakketten** — zelfde als "Inkomende pakketten", maar voor pakketten die jij verstuurt.
+- **Inkomende pakketten** — alleen de pakketten die nog niet zijn bezorgd, met datum en
+  tijdvenster, gesorteerd op wanneer ze worden verwacht.
+- **Geleverde pakketten** — pakketten die al zijn bezorgd, tot een instelbaar aantal dagen terug
+  (zie parameter "Bezorgd tonen (dagen)" bij de hardware-instellingen, standaard 2), nieuwste eerst.
+- **Verzonden pakketten** — zelfde indeling (nog niet bezorgd + recent bezorgd), maar voor
+  pakketten die jij verstuurt.
 - **Vandaag bezorgd** — schakelaar (On/Off), alleen-lezen indicator of er vandaag iets is bezorgd.
 
 ## Vereisten
@@ -38,9 +39,9 @@ Na installatie verschijnen 5 devices:
    ```
 3. Ga in Domoticz naar **Instellingen → Hardware** en voeg nieuwe hardware toe van het
    type **PostNL Pakket Tracking**.
-4. Vul je PostNL e-mailadres en wachtwoord in, kies een interval (standaard 60 minuten)
-   en sla op.
-5. De 4 devices verschijnen onder **Instellingen → Apparaten** (evt. eerst "toegevoegd"
+4. Vul je PostNL e-mailadres en wachtwoord in, kies een interval (standaard 60 minuten) en
+   hoeveel dagen bezorgde pakketten getoond moeten worden (standaard 2), en sla op.
+5. De 5 devices verschijnen onder **Instellingen → Apparaten** (evt. eerst "toegevoegd"
    filter gebruiken) — zet ze op je dashboard.
 
 ## Belangrijk om te weten

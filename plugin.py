@@ -26,6 +26,15 @@
                 <option label="120" value="120"/>
             </options>
         </param>
+        <param field="Mode2" label="Bezorgd tonen (dagen)" width="100px">
+            <options>
+                <option label="1" value="1"/>
+                <option label="2" value="2" default="true"/>
+                <option label="3" value="3"/>
+                <option label="5" value="5"/>
+                <option label="7" value="7"/>
+            </options>
+        </param>
         <param field="Mode6" label="Debug" width="100px">
             <options>
                 <option label="Normaal" value="Normal" default="true"/>
@@ -80,10 +89,10 @@ UNIT_COUNT = 1
 UNIT_INBOX = 2
 UNIT_SENT = 3
 UNIT_DELIVERED_TODAY = 4
-UNIT_UPCOMING = 5
+UNIT_DELIVERED_LIST = 5
 
 HEARTBEAT_SECONDS = 30
-RELEVANT_DELIVERED_DAYS = 2
+DEFAULT_DELIVERED_DAYS = 2
 MAX_TEXT_LINES = 10
 
 
@@ -103,6 +112,7 @@ class BasePlugin:
         self.debug_enabled = False
         self.available = True
         self.poll_interval_minutes = 60
+        self.delivered_days = DEFAULT_DELIVERED_DAYS
         self.ticks_needed = 1
         self.tick_count = 0
 
@@ -474,25 +484,15 @@ class BasePlugin:
             return "{}: {} ({})".format(who, status_nl, extra)
         return "{}: {}".format(who, status_nl)
 
-    def _relevant_entries(self, entries):
-        """Alles wat nog actie/aandacht kan vragen, plus recent bezorgde pakketten
-        (laatste RELEVANT_DELIVERED_DAYS dagen) — zodat de lijst niet blijft groeien
-        met bezorgingen van weken geleden."""
-        cutoff = time.strftime("%Y-%m-%d", time.localtime(time.time() - RELEVANT_DELIVERED_DAYS * 86400))
-
-        pending = [e for e in entries if e["status"] != "Delivered"]
-        pending.sort(key=lambda e: e["from"] or e["deliveryDate"] or "")
-
-        recent_delivered = [
-            e for e in entries
-            if e["status"] == "Delivered" and e["deliveryDate"][:10] >= cutoff
-        ]
-        recent_delivered.sort(key=lambda e: e["deliveryDate"] or "", reverse=True)
-
-        return (pending + recent_delivered)[:MAX_TEXT_LINES]
+    def _pending_entries(self, entries):
+        """Nog niet bezorgd (en geen retour), gesorteerd op verwachte datum/tijd."""
+        pending = [e for e in entries if e["status"] not in ("Delivered", "ReturnToSender")]
+        pending.sort(key=lambda e: e["from"] or "")
+        return pending[:MAX_TEXT_LINES]
 
     def _recent_delivered(self, entries):
-        cutoff = time.strftime("%Y-%m-%d", time.localtime(time.time() - RELEVANT_DELIVERED_DAYS * 86400))
+        """Al bezorgd binnen de laatste self.delivered_days dagen, nieuwste eerst."""
+        cutoff = time.strftime("%Y-%m-%d", time.localtime(time.time() - self.delivered_days * 86400))
         delivered = [
             e for e in entries
             if e["status"] == "Delivered" and e["deliveryDate"][:10] >= cutoff
@@ -501,21 +501,20 @@ class BasePlugin:
         return delivered[:MAX_TEXT_LINES]
 
     def update_devices(self, receiver, sender):
-        active = [e for e in receiver if e["status"] not in ("Delivered", "ReturnToSender")]
-        Devices[UNIT_COUNT].Update(nValue=len(active), sValue=str(len(active)))
+        pending = self._pending_entries(receiver)
+        Devices[UNIT_COUNT].Update(nValue=len(pending), sValue=str(len(pending)))
 
-        inbox_lines = [self.format_line(e) for e in self._recent_delivered(receiver)]
-        text_in = "\n".join(inbox_lines) or "Nog niets bezorgd"
-        Devices[UNIT_INBOX].Update(nValue=0, sValue=text_in[:400])
+        pending_lines = [self.format_line(e) for e in pending]
+        text_pending = "\n".join(pending_lines) or "Geen pakketten onderweg"
+        Devices[UNIT_INBOX].Update(nValue=0, sValue=text_pending[:400])
 
-        sent_lines = [self.format_line(e) for e in self._relevant_entries(sender)]
+        delivered_lines = [self.format_line(e) for e in self._recent_delivered(receiver)]
+        text_delivered = "\n".join(delivered_lines) or "Nog niets bezorgd"
+        Devices[UNIT_DELIVERED_LIST].Update(nValue=0, sValue=text_delivered[:400])
+
+        sent_lines = [self.format_line(e) for e in self._pending_entries(sender) + self._recent_delivered(sender)]
         text_out = "\n".join(sent_lines) or "Geen verzonden pakketten"
         Devices[UNIT_SENT].Update(nValue=0, sValue=text_out[:400])
-
-        upcoming = sorted(active, key=lambda e: e["from"] or "")[:MAX_TEXT_LINES]
-        upcoming_lines = [self.format_line(e) for e in upcoming]
-        text_upcoming = "\n".join(upcoming_lines) or "Geen pakketten onderweg"
-        Devices[UNIT_UPCOMING].Update(nValue=len(active), sValue=text_upcoming[:400])
 
         today = time.strftime("%Y-%m-%d")
         delivered_today = any(
@@ -566,19 +565,26 @@ class BasePlugin:
         if self.poll_interval_minutes < 15:
             self.poll_interval_minutes = 15
 
+        try:
+            self.delivered_days = int(Parameters.get("Mode2") or DEFAULT_DELIVERED_DAYS)
+        except ValueError:
+            self.delivered_days = DEFAULT_DELIVERED_DAYS
+        if self.delivered_days < 1:
+            self.delivered_days = 1
+
         if UNIT_COUNT not in Devices:
             Domoticz.Device(
                 Name="Aantal onderweg", Unit=UNIT_COUNT, TypeName="Custom",
                 Options={"Custom": "1;pakketten"}
             ).Create()
         if UNIT_INBOX not in Devices:
-            Domoticz.Device(Name="Bezorgde pakketten", Unit=UNIT_INBOX, TypeName="Text").Create()
+            Domoticz.Device(Name="Inkomende pakketten", Unit=UNIT_INBOX, TypeName="Text").Create()
         if UNIT_SENT not in Devices:
             Domoticz.Device(Name="Verzonden pakketten", Unit=UNIT_SENT, TypeName="Text").Create()
         if UNIT_DELIVERED_TODAY not in Devices:
             Domoticz.Device(Name="Vandaag bezorgd", Unit=UNIT_DELIVERED_TODAY, TypeName="Switch").Create()
-        if UNIT_UPCOMING not in Devices:
-            Domoticz.Device(Name="Aankomende pakketten", Unit=UNIT_UPCOMING, TypeName="Text").Create()
+        if UNIT_DELIVERED_LIST not in Devices:
+            Domoticz.Device(Name="Geleverde pakketten", Unit=UNIT_DELIVERED_LIST, TypeName="Text").Create()
 
         self.load_refresh_token()
 
