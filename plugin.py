@@ -80,8 +80,11 @@ UNIT_COUNT = 1
 UNIT_INBOX = 2
 UNIT_SENT = 3
 UNIT_DELIVERED_TODAY = 4
+UNIT_UPCOMING = 5
 
 HEARTBEAT_SECONDS = 30
+RELEVANT_DELIVERED_DAYS = 2
+MAX_TEXT_LINES = 10
 
 
 class PostNLError(Exception):
@@ -471,15 +474,34 @@ class BasePlugin:
             return "{}: {} ({})".format(who, status_nl, extra)
         return "{}: {}".format(who, status_nl)
 
+    def _relevant_entries(self, entries):
+        """Alles wat nog actie/aandacht kan vragen, plus recent bezorgde pakketten
+        (laatste RELEVANT_DELIVERED_DAYS dagen) — zodat de lijst niet blijft groeien
+        met bezorgingen van weken geleden."""
+        cutoff = time.strftime("%Y-%m-%d", time.localtime(time.time() - RELEVANT_DELIVERED_DAYS * 86400))
+
+        pending = [e for e in entries if e["status"] != "Delivered"]
+        pending.sort(key=lambda e: e["from"] or e["deliveryDate"] or "")
+
+        recent_delivered = [
+            e for e in entries
+            if e["status"] == "Delivered" and e["deliveryDate"][:10] >= cutoff
+        ]
+        recent_delivered.sort(key=lambda e: e["deliveryDate"] or "", reverse=True)
+
+        return (pending + recent_delivered)[:MAX_TEXT_LINES]
+
     def update_devices(self, receiver, sender):
         active = [e for e in receiver if e["status"] not in ("Delivered", "ReturnToSender")]
         Devices[UNIT_COUNT].Update(nValue=len(active), sValue=str(len(active)))
 
-        text_in = " || ".join(self.format_line(e) for e in receiver) or "Geen pakketten"
-        Devices[UNIT_INBOX].Update(nValue=0, sValue=text_in[:250])
+        inbox_lines = [self.format_line(e) for e in self._relevant_entries(receiver)]
+        text_in = "\n".join(inbox_lines) or "Geen pakketten"
+        Devices[UNIT_INBOX].Update(nValue=0, sValue=text_in[:400])
 
-        text_out = " || ".join(self.format_line(e) for e in sender) or "Geen verzonden pakketten"
-        Devices[UNIT_SENT].Update(nValue=0, sValue=text_out[:250])
+        sent_lines = [self.format_line(e) for e in self._relevant_entries(sender)]
+        text_out = "\n".join(sent_lines) or "Geen verzonden pakketten"
+        Devices[UNIT_SENT].Update(nValue=0, sValue=text_out[:400])
 
         today = time.strftime("%Y-%m-%d")
         delivered_today = any(
