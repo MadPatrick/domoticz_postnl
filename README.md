@@ -9,8 +9,8 @@ en toont inkomende/verzonden zendingen (Track & Trace) als Domoticz-devices.
 Na installatie verschijnen 5 devices:
 
 - **Aantal onderweg** — teller met het aantal inkomende pakketten dat nog niet bezorgd/retour is.
-- **Inkomende pakketten** — tekstregel per pakket: afzender, status, datum/tijdvenster. Toont
-  actieve pakketten plus pakketten die de laatste 2 dagen zijn bezorgd (max. 10 regels).
+- **Bezorgde pakketten** — tekstregel per pakket dat de laatste 2 dagen is bezorgd, met datum/tijd
+  (max. 10 regels, nieuwste eerst).
 - **Aankomende pakketten** — alleen de pakketten die nog onderweg zijn, met datum en tijdvenster,
   gesorteerd op wanneer ze worden verwacht.
 - **Verzonden pakketten** — zelfde als "Inkomende pakketten", maar voor pakketten die jij verstuurt.

@@ -491,12 +491,21 @@ class BasePlugin:
 
         return (pending + recent_delivered)[:MAX_TEXT_LINES]
 
+    def _recent_delivered(self, entries):
+        cutoff = time.strftime("%Y-%m-%d", time.localtime(time.time() - RELEVANT_DELIVERED_DAYS * 86400))
+        delivered = [
+            e for e in entries
+            if e["status"] == "Delivered" and e["deliveryDate"][:10] >= cutoff
+        ]
+        delivered.sort(key=lambda e: e["deliveryDate"] or "", reverse=True)
+        return delivered[:MAX_TEXT_LINES]
+
     def update_devices(self, receiver, sender):
         active = [e for e in receiver if e["status"] not in ("Delivered", "ReturnToSender")]
         Devices[UNIT_COUNT].Update(nValue=len(active), sValue=str(len(active)))
 
-        inbox_lines = [self.format_line(e) for e in self._relevant_entries(receiver)]
-        text_in = "\n".join(inbox_lines) or "Geen pakketten"
+        inbox_lines = [self.format_line(e) for e in self._recent_delivered(receiver)]
+        text_in = "\n".join(inbox_lines) or "Nog niets bezorgd"
         Devices[UNIT_INBOX].Update(nValue=0, sValue=text_in[:400])
 
         sent_lines = [self.format_line(e) for e in self._relevant_entries(sender)]
@@ -563,7 +572,7 @@ class BasePlugin:
                 Options={"Custom": "1;pakketten"}
             ).Create()
         if UNIT_INBOX not in Devices:
-            Domoticz.Device(Name="Inkomende pakketten", Unit=UNIT_INBOX, TypeName="Text").Create()
+            Domoticz.Device(Name="Bezorgde pakketten", Unit=UNIT_INBOX, TypeName="Text").Create()
         if UNIT_SENT not in Devices:
             Domoticz.Device(Name="Verzonden pakketten", Unit=UNIT_SENT, TypeName="Text").Create()
         if UNIT_DELIVERED_TODAY not in Devices:
