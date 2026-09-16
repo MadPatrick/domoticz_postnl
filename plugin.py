@@ -149,7 +149,12 @@ class BasePlugin:
     @staticmethod
     def _fmt_time(iso_ts):
         m = re.search(r"T(\d{2}:\d{2})", iso_ts or "")
-        return m.group(1) if m else (iso_ts or "")
+        return m.group(1) if m else ""
+
+    @staticmethod
+    def _fmt_date(iso_ts):
+        m = re.search(r"(\d{4})-(\d{2})-(\d{2})", iso_ts or "")
+        return "{}-{}-{}".format(m.group(3), m.group(2), m.group(1)) if m else ""
 
     # ------------------------------------------------------------- login flow
     def full_login(self):
@@ -448,10 +453,23 @@ class BasePlugin:
     # ------------------------------------------------------------- devices
     def format_line(self, e):
         who = e["senderCompany"] or e["senderLast"] or e["recipientTown"] or "Onbekend"
-        window = ""
-        if e["from"]:
-            window = " ({} - {})".format(self._fmt_time(e["from"]), self._fmt_time(e["to"]))
-        return "{}: {}{}".format(who, STATUS_NL.get(e["status"], e["status"]), window)
+        status_nl = STATUS_NL.get(e["status"], e["status"])
+
+        extra = ""
+        if e["status"] == "Delivered" and e["deliveryDate"]:
+            date = self._fmt_date(e["deliveryDate"])
+            t = self._fmt_time(e["deliveryDate"])
+            extra = " ".join(p for p in (date, t) if p)
+        elif e["from"]:
+            date = self._fmt_date(e["from"])
+            t_from = self._fmt_time(e["from"])
+            t_to = self._fmt_time(e["to"])
+            window = "{}-{}".format(t_from, t_to) if t_from and t_to else (t_from or t_to)
+            extra = " ".join(p for p in (date, window) if p)
+
+        if extra:
+            return "{}: {} ({})".format(who, status_nl, extra)
+        return "{}: {}".format(who, status_nl)
 
     def update_devices(self, receiver, sender):
         active = [e for e in receiver if e["status"] not in ("Delivered", "ReturnToSender")]
