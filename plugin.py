@@ -630,7 +630,7 @@ class BasePlugin:
         if UNIT_DELIVERED_TODAY not in Devices:
             Domoticz.Device(Name="Delivered Today", Unit=UNIT_DELIVERED_TODAY, TypeName="Switch").Create()
         if UNIT_DELIVERED_LIST not in Devices:
-            Domoticz.Device(Name="Packages Delivery", Unit=UNIT_DELIVERED_LIST, TypeName="Text").Create()
+            Domoticz.Device(Name="Packages Delivered", Unit=UNIT_DELIVERED_LIST, TypeName="Text").Create()
 
         self.client = PostNLClient(
             username=Parameters.get("Username"),
