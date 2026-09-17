@@ -6,20 +6,31 @@ en toont inkomende/verzonden zendingen (Track & Trace) als Domoticz-devices.
 
 ## Wat je krijgt
 
-Na installatie verschijnen 5 devices:
+Na installatie verschijnen 5 devices (namen in het Engels, de tekst erin volgt de taalkeuze):
 
-- **Aantal onderweg** — teller met het aantal inkomende pakketten dat nog niet bezorgd/retour is.
-- **Inkomende pakketten** — alleen de pakketten die nog niet zijn bezorgd, met datum en
+- **Packages in transit** — teller met het aantal inkomende pakketten dat nog niet bezorgd/retour is.
+- **Incoming packages** — alleen de pakketten die nog niet zijn bezorgd, met datum en
   tijdvenster, gesorteerd op wanneer ze worden verwacht.
-- **Geleverde pakketten** — pakketten die al zijn bezorgd, tot een instelbaar aantal dagen terug
-  (zie parameter "Bezorgd tonen (dagen)" bij de hardware-instellingen, standaard 2), nieuwste eerst.
-- **Verzonden pakketten** — zelfde indeling (nog niet bezorgd + recent bezorgd), maar voor
-  pakketten die jij verstuurt.
-- **Vandaag bezorgd** — schakelaar (On/Off), alleen-lezen indicator of er vandaag iets is bezorgd.
+- **Delivered packages** — pakketten die al zijn bezorgd, tot een instelbaar aantal dagen terug
+  (zie parameter "Show delivered for (days)" bij de hardware-instellingen, standaard 2), nieuwste
+  eerst. De tekst die verschijnt als er niets bezorgd is, is zelf ook instelbaar (parameter
+  "Text shown when nothing was delivered", standaard "Niets onderweg").
+- **Sent packages** — zelfde indeling (nog niet bezorgd + recent bezorgd), maar voor pakketten
+  die jij verstuurt.
+- **Delivered today** — schakelaar (On/Off), alleen-lezen indicator of er vandaag iets is bezorgd.
+
+De plugin zelf (logs, interne code) is volledig in het Engels. Welke taal de tekst in de
+devices gebruikt (statuswoorden zoals "Onderweg"/"In transit", "Bezorgd"/"Delivered", lege-lijst
+teksten) stel je apart in via de parameter **"Device text language"** (Engels of Nederlands).
 
 ## Vereisten
 
-- Domoticz met Python-plugin support (standaard aanwezig in moderne Domoticz).
+- Domoticz met Python-plugin support, én met "Extended Plugin Settings" (vrije parameter-
+  velden, `type="number"`/`type="boolean"`, `<group>`). Dit zit op moment van schrijven alleen
+  in de `development`-branch van Domoticz, nog niet in een stable release. Op een oudere
+  Domoticz-versie worden de velden "Interval (minuten)", "Bezorgd tonen (dagen)" en "Debug"
+  niet correct getoond/opgeslagen — gebruik dan een build van vóór deze wijziging (zie git-
+  historie) die met de klassieke Mode1/Mode2/Mode6-dropdowns werkt.
 - Python-module `requests` beschikbaar voor de Python die Domoticz gebruikt:
   ```bash
   sudo pip3 install requests
@@ -38,9 +49,10 @@ Na installatie verschijnen 5 devices:
    sudo systemctl restart domoticz
    ```
 3. Ga in Domoticz naar **Instellingen → Hardware** en voeg nieuwe hardware toe van het
-   type **PostNL Pakket Tracking**.
-4. Vul je PostNL e-mailadres en wachtwoord in, kies een interval (standaard 60 minuten) en
-   hoeveel dagen bezorgde pakketten getoond moeten worden (standaard 2), en sla op.
+   type **PostNL Package Tracking**.
+4. Vul je PostNL e-mailadres en wachtwoord in, kies een interval (standaard 60 minuten),
+   hoeveel dagen bezorgde pakketten getoond moeten worden (standaard 2), de gewenste taal
+   voor de device-teksten, en eventueel een eigen tekst voor "niets bezorgd" — en sla op.
 5. De 5 devices verschijnen onder **Instellingen → Apparaten** (evt. eerst "toegevoegd"
    filter gebruiken) — zet ze op je dashboard.
 

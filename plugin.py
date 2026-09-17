@@ -1,46 +1,35 @@
 """
-<plugin key="PostNL" name="PostNL Pakket Tracking" author="patrick" version="1.0.0" externallink="https://github.com/ToonSoftwareCollective/postnl">
+<plugin key="PostNL" name="PostNL Package Tracking" author="patrick" version="1.2.0" externallink="https://github.com/ToonSoftwareCollective/postnl">
     <description>
-        <h2>PostNL Pakket Tracking</h2>
-        <p>Toont inkomende en verzonden PostNL-zendingen (Track &amp; Trace) uit je PostNL-account.</p>
-        <p>Portering van de Toon-app <i>postnl</i> (ToonSoftwareCollective) naar een Domoticz-plugin.</p>
-        <h3>Vereisten</h3>
+        <h2>PostNL Package Tracking</h2>
+        <p>Shows incoming and outgoing PostNL shipments (Track &amp; Trace) from your PostNL account.</p>
+        <p>Ported from the Toon app <i>postnl</i> (ToonSoftwareCollective) to a Domoticz plugin.</p>
+        <h3>Requirements</h3>
         <ul style="list-style-type:square">
-            <li>Een PostNL-account (jouw.postnl.nl)</li>
-            <li>Python-module 'requests' (pip3 install requests)</li>
+            <li>A PostNL account (jouw.postnl.nl)</li>
+            <li>Python module 'requests' (pip3 install requests)</li>
         </ul>
-        <h3>Let op</h3>
+        <h3>Notes</h3>
         <ul style="list-style-type:square">
-            <li>Deze plugin gebruikt een niet-officiele, "reverse-engineered" inlogflow. Als PostNL het inlogproces wijzigt kan de plugin stoppen met werken.</li>
-            <li>Vraag niet te vaak op (minimaal 15 minuten interval) om je account niet te blokkeren.</li>
+            <li>This plugin uses an unofficial, reverse-engineered login flow. If PostNL changes their login process, the plugin may stop working.</li>
+            <li>Do not poll too often (15 minute minimum interval) to avoid your account being flagged.</li>
         </ul>
     </description>
     <params>
-        <param field="Username" label="PostNL e-mailadres" width="300px" required="true"/>
-        <param field="Password" label="PostNL wachtwoord" width="300px" required="true" password="true"/>
-        <param field="Mode1" label="Interval (minuten)" width="100px">
+        <param field="Username" label="PostNL e-mail address" width="300px" required="true"/>
+        <param field="Password" label="PostNL password" width="300px" required="true" password="true"/>
+        <param field="PollMinutes" type="number" label="Poll interval (minutes)" min="15" max="720" step="15" default="60" width="100px"/>
+        <param field="DeliveredDays" type="number" label="Show delivered for (days)" min="1" max="30" step="1" default="2" width="100px"/>
+        <param field="Language" label="Device text language" width="150px">
             <options>
-                <option label="15" value="15"/>
-                <option label="30" value="30"/>
-                <option label="60" value="60" default="true"/>
-                <option label="120" value="120"/>
+                <option label="English" value="en" default="true"/>
+                <option label="Nederlands" value="nl"/>
             </options>
         </param>
-        <param field="Mode2" label="Bezorgd tonen (dagen)" width="100px">
-            <options>
-                <option label="1" value="1"/>
-                <option label="2" value="2" default="true"/>
-                <option label="3" value="3"/>
-                <option label="5" value="5"/>
-                <option label="7" value="7"/>
-            </options>
-        </param>
-        <param field="Mode6" label="Debug" width="100px">
-            <options>
-                <option label="Normaal" value="Normal" default="true"/>
-                <option label="Debug" value="Debug"/>
-            </options>
-        </param>
+        <param field="DeliveredEmptyText" label="Text shown when nothing was delivered" width="300px" default="Niets onderweg"/>
+        <group label="Advanced">
+            <param field="Debug" type="boolean" label="Debug" default="false"/>
+        </group>
     </params>
 </plugin>
 """
@@ -78,11 +67,30 @@ GRAPHQL_QUERY = (
     "} }"
 )
 
-STATUS_NL = {
-    "Open": "Onderweg",
-    "InTransit": "Onderweg",
-    "Delivered": "Bezorgd",
-    "ReturnToSender": "Retour afzender",
+DEFAULT_LANGUAGE = "en"
+TRANSLATIONS = {
+    "en": {
+        "status": {
+            "Open": "In transit",
+            "InTransit": "In transit",
+            "Delivered": "Delivered",
+            "ReturnToSender": "Returned to sender",
+        },
+        "unknown_sender": "Unknown",
+        "no_pending": "Nothing on the way",
+        "no_sent": "No shipments sent",
+    },
+    "nl": {
+        "status": {
+            "Open": "Onderweg",
+            "InTransit": "Onderweg",
+            "Delivered": "Bezorgd",
+            "ReturnToSender": "Retour afzender",
+        },
+        "unknown_sender": "Onbekend",
+        "no_pending": "Geen pakketten onderweg",
+        "no_sent": "Geen verzonden pakketten",
+    },
 }
 
 UNIT_COUNT = 1
@@ -93,6 +101,7 @@ UNIT_DELIVERED_LIST = 5
 
 HEARTBEAT_SECONDS = 30
 DEFAULT_DELIVERED_DAYS = 2
+DEFAULT_DELIVERED_EMPTY_TEXT = "Niets onderweg"
 MAX_TEXT_LINES = 10
 
 
@@ -113,6 +122,8 @@ class BasePlugin:
         self.available = True
         self.poll_interval_minutes = 60
         self.delivered_days = DEFAULT_DELIVERED_DAYS
+        self.delivered_empty_text = DEFAULT_DELIVERED_EMPTY_TEXT
+        self.i18n = TRANSLATIONS[DEFAULT_LANGUAGE]
         self.ticks_needed = 1
         self.tick_count = 0
 
@@ -140,7 +151,7 @@ class BasePlugin:
         try:
             Domoticz.Configuration(cfg)
         except Exception as e:
-            Domoticz.Error("Kon refresh token niet opslaan: {}".format(e))
+            Domoticz.Error("Failed to save refresh token: {}".format(e))
 
     @staticmethod
     def _first_match(pattern, text, exclude=None):
@@ -195,7 +206,7 @@ class BasePlugin:
         r1 = session.get(auth_url, params=auth_params, allow_redirects=False, timeout=20)
         authui = r1.headers.get("Location")
         if not authui or "auth-ui" not in authui:
-            raise PostNLError("Geen hosted-login redirect ontvangen van authorize.")
+            raise PostNLError("No hosted-login redirect received from authorize.")
 
         # Step 2: load hosted login page (sets _csrf_token cookie, exposes capture settings)
         r2 = session.get(authui, allow_redirects=False, timeout=20)
@@ -208,7 +219,7 @@ class BasePlugin:
             if c.name == "_csrf_token":
                 csrf = c.value
         if not app_id or not client_id:
-            raise PostNLError("Kon login-widget instellingen niet lezen.")
+            raise PostNLError("Could not read login widget settings.")
         self.debug("capture appId={} client={} flow={}".format(app_id, client_id, flow_name))
 
         # Step 2b: flow file -> current flow version
@@ -252,10 +263,10 @@ class BasePlugin:
             timeout=20,
         )
         if "invalidCredentials" in r3b.text or "invalidPassword" in r3b.text:
-            raise PostNLError("PostNL heeft gebruikersnaam/wachtwoord geweigerd.")
+            raise PostNLError("PostNL rejected the username/password.")
         cap_token = self._first_match(r'"accessToken":"([^"]*)"', r3b.text)
         if not cap_token:
-            raise PostNLError("Geen capture access token ontvangen (login mislukt).")
+            raise PostNLError("No capture access token received (login failed).")
 
         # Step 4: hand the capture token to auth-ui token-url, establishing the SSO session cookie
         authui_query = urllib.parse.parse_qs(urllib.parse.urlsplit(authui).query)
@@ -283,7 +294,7 @@ class BasePlugin:
             loc = rn.headers.get("Location")
             code = self._extract_code(loc)
         if not code:
-            raise PostNLError("Geen authorization code ontvangen na login.")
+            raise PostNLError("No authorization code received after login.")
 
         # Step 5: exchange the code for tokens
         r5 = session.post(
@@ -298,12 +309,12 @@ class BasePlugin:
             timeout=20,
         )
         if r5.status_code != 200:
-            raise PostNLError("Token exchange mislukt (status {}).".format(r5.status_code))
+            raise PostNLError("Token exchange failed (status {}).".format(r5.status_code))
         tokens = r5.json()
         access_token = tokens.get("access_token")
         refresh_token = tokens.get("refresh_token")
         if not access_token:
-            raise PostNLError("Geen access token ontvangen van token endpoint.")
+            raise PostNLError("No access token received from token endpoint.")
         if refresh_token:
             self.refresh_token = refresh_token
             self.save_refresh_token()
@@ -323,7 +334,7 @@ class BasePlugin:
             timeout=20,
         )
         if r.status_code != 200:
-            self.debug("Refresh token geweigerd (status {}).".format(r.status_code))
+            self.debug("Refresh token rejected (status {}).".format(r.status_code))
             return None
         tokens = r.json()
         access_token = tokens.get("access_token")
@@ -339,7 +350,7 @@ class BasePlugin:
         if not force_full:
             token = self.refresh_access_token()
             if token:
-                self.debug("Hergebruikt login via refresh token.")
+                self.debug("Reused login via refresh token.")
                 return token
         return self.full_login()
 
@@ -356,7 +367,7 @@ class BasePlugin:
                 return None
             return r.json().get(barcode)
         except Exception as e:
-            self.debug("Track & trace opvragen mislukt voor {}: {}".format(barcode, e))
+            self.debug("Track & trace lookup failed for {}: {}".format(barcode, e))
             return None
 
     def build_entry(self, item, role, access_token):
@@ -453,7 +464,7 @@ class BasePlugin:
         if r.status_code == 401:
             raise PostNLAuthError("Unauthorized")
         if r.status_code != 200:
-            raise PostNLError("Ophalen zendingen mislukt (status {}).".format(r.status_code))
+            raise PostNLError("Fetching shipments failed (status {}).".format(r.status_code))
         payload = r.json()
         shipments = (payload.get("data") or {}).get("trackedShipments") or {}
         receiver_raw = shipments.get("receiverShipments") or []
@@ -465,8 +476,8 @@ class BasePlugin:
 
     # ------------------------------------------------------------- devices
     def format_line(self, e):
-        who = e["senderCompany"] or e["senderLast"] or e["recipientTown"] or "Onbekend"
-        status_nl = STATUS_NL.get(e["status"], e["status"])
+        who = e["senderCompany"] or e["senderLast"] or e["recipientTown"] or self.i18n["unknown_sender"]
+        status_label = self.i18n["status"].get(e["status"], e["status"])
 
         extra = ""
         if e["status"] == "Delivered" and e["deliveryDate"]:
@@ -481,17 +492,17 @@ class BasePlugin:
             extra = " ".join(p for p in (date, window) if p)
 
         if extra:
-            return "{}: {} ({})".format(who, status_nl, extra)
-        return "{}: {}".format(who, status_nl)
+            return "{}: {} ({})".format(who, status_label, extra)
+        return "{}: {}".format(who, status_label)
 
     def _pending_entries(self, entries):
-        """Nog niet bezorgd (en geen retour), gesorteerd op verwachte datum/tijd."""
+        """Not yet delivered (and not returned), sorted by expected date/time."""
         pending = [e for e in entries if e["status"] not in ("Delivered", "ReturnToSender")]
         pending.sort(key=lambda e: e["from"] or "")
         return pending[:MAX_TEXT_LINES]
 
     def _recent_delivered(self, entries):
-        """Al bezorgd binnen de laatste self.delivered_days dagen, nieuwste eerst."""
+        """Delivered within the last self.delivered_days days, newest first."""
         cutoff = time.strftime("%Y-%m-%d", time.localtime(time.time() - self.delivered_days * 86400))
         delivered = [
             e for e in entries
@@ -505,15 +516,15 @@ class BasePlugin:
         Devices[UNIT_COUNT].Update(nValue=len(pending), sValue=str(len(pending)))
 
         pending_lines = [self.format_line(e) for e in pending]
-        text_pending = "\n".join(pending_lines) or "Geen pakketten onderweg"
+        text_pending = "\n".join(pending_lines) or self.i18n["no_pending"]
         Devices[UNIT_INBOX].Update(nValue=0, sValue=text_pending[:400])
 
         delivered_lines = [self.format_line(e) for e in self._recent_delivered(receiver)]
-        text_delivered = "\n".join(delivered_lines) or "Nog niets bezorgd"
+        text_delivered = "\n".join(delivered_lines) or self.delivered_empty_text
         Devices[UNIT_DELIVERED_LIST].Update(nValue=0, sValue=text_delivered[:400])
 
         sent_lines = [self.format_line(e) for e in self._pending_entries(sender) + self._recent_delivered(sender)]
-        text_out = "\n".join(sent_lines) or "Geen verzonden pakketten"
+        text_out = "\n".join(sent_lines) or self.i18n["no_sent"]
         Devices[UNIT_SENT].Update(nValue=0, sValue=text_out[:400])
 
         today = time.strftime("%Y-%m-%d")
@@ -526,31 +537,31 @@ class BasePlugin:
 
     # --------------------------------------------------------------- run
     def run_update(self):
-        self.debug("Start PostNL update")
+        self.debug("Starting PostNL update")
         try:
             access_token = self.get_access_token()
             try:
                 receiver, sender = self.fetch_shipments(access_token)
             except PostNLAuthError:
-                self.debug("Access token verlopen tijdens ophalen, opnieuw inloggen.")
+                self.debug("Access token expired while fetching, logging in again.")
                 access_token = self.get_access_token(force_full=True)
                 receiver, sender = self.fetch_shipments(access_token)
             self.update_devices(receiver, sender)
             self.debug(
-                "PostNL update geslaagd: {} inkomend, {} verzonden".format(len(receiver), len(sender))
+                "PostNL update succeeded: {} incoming, {} sent".format(len(receiver), len(sender))
             )
         except Exception as e:
-            Domoticz.Error("PostNL update mislukt: {}".format(e))
+            Domoticz.Error("PostNL update failed: {}".format(e))
 
     # --------------------------------------------------------- Domoticz hooks
     def onStart(self):
-        self.debug_enabled = Parameters.get("Mode6") == "Debug"
+        self.debug_enabled = str(Parameters.get("Debug", "false")).strip().lower() == "true"
         if self.debug_enabled:
             Domoticz.Debugging(1)
 
         if requests is None:
             Domoticz.Error(
-                "De python module 'requests' ontbreekt. Installeer met: pip3 install requests"
+                "The python module 'requests' is missing. Install it with: pip3 install requests"
             )
             self.available = False
             return
@@ -559,32 +570,37 @@ class BasePlugin:
         self.password = Parameters.get("Password")
 
         try:
-            self.poll_interval_minutes = int(Parameters.get("Mode1") or 60)
+            self.poll_interval_minutes = int(Parameters.get("PollMinutes") or 60)
         except ValueError:
             self.poll_interval_minutes = 60
         if self.poll_interval_minutes < 15:
             self.poll_interval_minutes = 15
 
         try:
-            self.delivered_days = int(Parameters.get("Mode2") or DEFAULT_DELIVERED_DAYS)
+            self.delivered_days = int(Parameters.get("DeliveredDays") or DEFAULT_DELIVERED_DAYS)
         except ValueError:
             self.delivered_days = DEFAULT_DELIVERED_DAYS
         if self.delivered_days < 1:
             self.delivered_days = 1
 
+        language = str(Parameters.get("Language") or DEFAULT_LANGUAGE).strip().lower()
+        self.i18n = TRANSLATIONS.get(language, TRANSLATIONS[DEFAULT_LANGUAGE])
+
+        self.delivered_empty_text = Parameters.get("DeliveredEmptyText") or DEFAULT_DELIVERED_EMPTY_TEXT
+
         if UNIT_COUNT not in Devices:
             Domoticz.Device(
-                Name="Aantal onderweg", Unit=UNIT_COUNT, TypeName="Custom",
-                Options={"Custom": "1;pakketten"}
+                Name="Packages in transit", Unit=UNIT_COUNT, TypeName="Custom",
+                Options={"Custom": "1;packages"}
             ).Create()
         if UNIT_INBOX not in Devices:
-            Domoticz.Device(Name="Inkomende pakketten", Unit=UNIT_INBOX, TypeName="Text").Create()
+            Domoticz.Device(Name="Incoming packages", Unit=UNIT_INBOX, TypeName="Text").Create()
         if UNIT_SENT not in Devices:
-            Domoticz.Device(Name="Verzonden pakketten", Unit=UNIT_SENT, TypeName="Text").Create()
+            Domoticz.Device(Name="Sent packages", Unit=UNIT_SENT, TypeName="Text").Create()
         if UNIT_DELIVERED_TODAY not in Devices:
-            Domoticz.Device(Name="Vandaag bezorgd", Unit=UNIT_DELIVERED_TODAY, TypeName="Switch").Create()
+            Domoticz.Device(Name="Delivered today", Unit=UNIT_DELIVERED_TODAY, TypeName="Switch").Create()
         if UNIT_DELIVERED_LIST not in Devices:
-            Domoticz.Device(Name="Geleverde pakketten", Unit=UNIT_DELIVERED_LIST, TypeName="Text").Create()
+            Domoticz.Device(Name="Delivered packages", Unit=UNIT_DELIVERED_LIST, TypeName="Text").Create()
 
         self.load_refresh_token()
 
@@ -604,7 +620,7 @@ class BasePlugin:
 
     def onCommand(self, Unit, Command, Level, Color):
         if Unit == UNIT_DELIVERED_TODAY:
-            Domoticz.Log("Dit apparaat is alleen-lezen; commando genegeerd.")
+            Domoticz.Log("This device is read-only; command ignored.")
             cur = Devices[Unit]
             Devices[Unit].Update(nValue=cur.nValue, sValue=cur.sValue)
 
