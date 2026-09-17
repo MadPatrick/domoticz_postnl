@@ -176,9 +176,9 @@ class BasePlugin:
         return m.group(1) if m else ""
 
     @staticmethod
-    def _fmt_date(iso_ts):
-        m = re.search(r"(\d{4})-(\d{2})-(\d{2})", iso_ts or "")
-        return "{}-{}-{}".format(m.group(3), m.group(2), m.group(1)) if m else ""
+    def _fmt_short_date(iso_ts):
+        m = re.search(r"\d{4}-(\d{2})-(\d{2})", iso_ts or "")
+        return "{}/{}".format(m.group(2), m.group(1)) if m else ""
 
     # ------------------------------------------------------------- login flow
     def full_login(self):
@@ -479,21 +479,20 @@ class BasePlugin:
         who = e["senderCompany"] or e["senderLast"] or e["recipientTown"] or self.i18n["unknown_sender"]
         status_label = self.i18n["status"].get(e["status"], e["status"])
 
-        extra = ""
+        date = ""
+        time_part = ""
         if e["status"] == "Delivered" and e["deliveryDate"]:
-            date = self._fmt_date(e["deliveryDate"])
-            t = self._fmt_time(e["deliveryDate"])
-            extra = " ".join(p for p in (date, t) if p)
+            date = self._fmt_short_date(e["deliveryDate"])
+            time_part = self._fmt_time(e["deliveryDate"])
         elif e["from"]:
-            date = self._fmt_date(e["from"])
+            date = self._fmt_short_date(e["from"])
             t_from = self._fmt_time(e["from"])
             t_to = self._fmt_time(e["to"])
-            window = "{}-{}".format(t_from, t_to) if t_from and t_to else (t_from or t_to)
-            extra = " ".join(p for p in (date, window) if p)
+            time_part = "{}-{}".format(t_from, t_to) if t_from and t_to else (t_from or t_to)
 
-        if extra:
-            return "{}: {} ({})".format(who, status_label, extra)
-        return "{}: {}".format(who, status_label)
+        prefix = "[{}] ".format(date) if date else ""
+        suffix = " {}".format(time_part) if time_part else ""
+        return "{}{}: {}{}".format(prefix, who, status_label, suffix)
 
     def _pending_entries(self, entries):
         """Not yet delivered (and not returned), sorted by expected date/time."""
