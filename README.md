@@ -6,18 +6,21 @@ en toont inkomende/verzonden zendingen (Track & Trace) als Domoticz-devices.
 
 ## Wat je krijgt
 
-Na installatie verschijnen 5 devices (namen in het Engels, de tekst erin volgt de taalkeuze):
+Na installatie verschijnen 5 devices (namen in het Engels, de tekst erin volgt de taalkeuze),
+elk met maximaal 10 regels, één pakket per regel in de vorm `[dd/mm] wie: status tijd(en)`,
+bijvoorbeeld `[06/08] bol: Onderweg 11:00-13:30`:
 
 - **Packages in transit** — teller met het aantal inkomende pakketten dat nog niet bezorgd/retour is.
-- **Incoming packages** — alleen de pakketten die nog niet zijn bezorgd, met datum en
-  tijdvenster, gesorteerd op wanneer ze worden verwacht.
-- **Delivered packages** — pakketten die al zijn bezorgd, tot een instelbaar aantal dagen terug
+- **Packages Incoming** — alleen de pakketten die nog niet zijn bezorgd, gesorteerd op wanneer
+  ze worden verwacht.
+- **Packages Delivery** — pakketten die al zijn bezorgd, tot een instelbaar aantal dagen terug
   (zie parameter "Show delivered for (days)" bij de hardware-instellingen, standaard 2), nieuwste
   eerst. De tekst die verschijnt als er niets bezorgd is, is zelf ook instelbaar (parameter
   "Text shown when nothing was delivered", standaard "Niets onderweg").
-- **Sent packages** — zelfde indeling (nog niet bezorgd + recent bezorgd), maar voor pakketten
-  die jij verstuurt.
-- **Delivered today** — schakelaar (On/Off), alleen-lezen indicator of er vandaag iets is bezorgd.
+- **Packages Sent** — zelfde indeling (nog niet bezorgd + recent bezorgd, samen ook max. 10
+  regels), maar voor pakketten die jij verstuurt. Hier toont "wie" de ontvanger (bedrijf/naam/
+  plaats) in plaats van de afzender, want die ben je bij verzonden pakketten zelf.
+- **Delivered Today** — schakelaar (On/Off), alleen-lezen indicator of er vandaag iets is bezorgd.
 
 De plugin zelf (logs, interne code) is volledig in het Engels. Welke taal de tekst in de
 devices gebruikt (statuswoorden zoals "Onderweg"/"In transit", "Bezorgd"/"Delivered", lege-lijst
