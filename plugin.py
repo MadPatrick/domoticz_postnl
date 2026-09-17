@@ -1,5 +1,5 @@
 """
-<plugin key="PostNL" name="PostNL Package Tracking" author="patrick" version="1.2.1" externallink="https://github.com/ToonSoftwareCollective/postnl">
+<plugin key="PostNL" name="PostNL Package Tracking" author="patrick" version="1.2.2" externallink="https://github.com/ToonSoftwareCollective/postnl">
     <description>
         <h2>PostNL Package Tracking</h2>
         <p>Shows incoming and outgoing PostNL shipments (Track &amp; Trace) from your PostNL account.</p>
@@ -38,6 +38,7 @@ import hashlib
 import re
 import secrets
 import time
+import traceback
 import urllib.parse
 
 import Domoticz
@@ -113,45 +114,19 @@ class PostNLAuthError(PostNLError):
     pass
 
 
-class BasePlugin:
-    def __init__(self):
-        self.username = None
-        self.password = None
-        self.refresh_token = None
-        self.debug_enabled = False
-        self.available = True
-        self.poll_interval_minutes = 60
-        self.delivered_days = DEFAULT_DELIVERED_DAYS
-        self.delivered_empty_text = DEFAULT_DELIVERED_EMPTY_TEXT
-        self.i18n = TRANSLATIONS[DEFAULT_LANGUAGE]
-        self.ticks_needed = 1
-        self.tick_count = 0
+class PostNLClient:
+    """Talks to PostNL's (unofficial) account API: login, session refresh and shipment
+    lookup. Has no Domoticz dependency, so it can be exercised or unit-tested on its own
+    (e.g. with requests-mock) independent of a running Domoticz instance."""
 
-    # ------------------------------------------------------------------ utils
-    def debug(self, msg):
-        if self.debug_enabled:
-            Domoticz.Debug(str(msg))
+    def __init__(self, username, password, refresh_token=None, log_debug=None):
+        self.username = username
+        self.password = password
+        self.refresh_token = refresh_token
+        self._log_debug = log_debug or (lambda msg: None)
 
-    def load_refresh_token(self):
-        try:
-            cfg = Domoticz.Configuration()
-        except Exception:
-            cfg = {}
-        self.refresh_token = (cfg or {}).get("refresh_token")
-
-    def save_refresh_token(self):
-        try:
-            cfg = Domoticz.Configuration() or {}
-        except Exception:
-            cfg = {}
-        if self.refresh_token:
-            cfg["refresh_token"] = self.refresh_token
-        else:
-            cfg.pop("refresh_token", None)
-        try:
-            Domoticz.Configuration(cfg)
-        except Exception as e:
-            Domoticz.Error("Failed to save refresh token: {}".format(e))
+    def _debug(self, msg):
+        self._log_debug(msg)
 
     @staticmethod
     def _first_match(pattern, text, exclude=None):
@@ -169,16 +144,6 @@ class BasePlugin:
         params = urllib.parse.parse_qs(qs)
         values = params.get("code")
         return values[0] if values else None
-
-    @staticmethod
-    def _fmt_time(iso_ts):
-        m = re.search(r"T(\d{2}:\d{2})", iso_ts or "")
-        return m.group(1) if m else ""
-
-    @staticmethod
-    def _fmt_short_date(iso_ts):
-        m = re.search(r"\d{4}-(\d{2})-(\d{2})", iso_ts or "")
-        return "{}/{}".format(m.group(2), m.group(1)) if m else ""
 
     # ------------------------------------------------------------- login flow
     def full_login(self):
@@ -220,7 +185,7 @@ class BasePlugin:
                 csrf = c.value
         if not app_id or not client_id:
             raise PostNLError("Could not read login widget settings.")
-        self.debug("capture appId={} client={} flow={}".format(app_id, client_id, flow_name))
+        self._debug("capture appId={} client={} flow={}".format(app_id, client_id, flow_name))
 
         # Step 2b: flow file -> current flow version
         flow_js_url = "https://ssl-static.janraincapture.com/widget_data/flow.js:{}:nl-NL:HEAD:{}".format(
@@ -317,7 +282,6 @@ class BasePlugin:
             raise PostNLError("No access token received from token endpoint.")
         if refresh_token:
             self.refresh_token = refresh_token
-            self.save_refresh_token()
         return access_token
 
     def refresh_access_token(self):
@@ -334,7 +298,7 @@ class BasePlugin:
             timeout=20,
         )
         if r.status_code != 200:
-            self.debug("Refresh token rejected (status {}).".format(r.status_code))
+            self._debug("Refresh token rejected (status {}).".format(r.status_code))
             return None
         tokens = r.json()
         access_token = tokens.get("access_token")
@@ -343,14 +307,13 @@ class BasePlugin:
         new_rt = tokens.get("refresh_token")
         if new_rt:
             self.refresh_token = new_rt
-            self.save_refresh_token()
         return access_token
 
     def get_access_token(self, force_full=False):
         if not force_full:
             token = self.refresh_access_token()
             if token:
-                self.debug("Reused login via refresh token.")
+                self._debug("Reused login via refresh token.")
                 return token
         return self.full_login()
 
@@ -367,7 +330,7 @@ class BasePlugin:
                 return None
             return r.json().get(barcode)
         except Exception as e:
-            self.debug("Track & trace lookup failed for {}: {}".format(barcode, e))
+            self._debug("Track & trace lookup failed for {}: {}".format(barcode, e))
             return None
 
     def build_entry(self, item, role, access_token):
@@ -390,6 +353,8 @@ class BasePlugin:
         rcpt_street = ""
         rcpt_house = ""
         rcpt_town = ""
+        rcpt_company = ""
+        rcpt_person = ""
         tt_delivered = None
         tt_return = None
         tt_atretail = None
@@ -408,7 +373,10 @@ class BasePlugin:
             s_company = sender_block.get("companyName") or ""
             s_person = sender_block.get("personName") or ""
             sender_town = (sender_block.get("address") or {}).get("town") or ""
-            recipient_addr = (colli.get("recipient") or {}).get("address") or {}
+            recipient_block = colli.get("recipient") or {}
+            recipient_addr = recipient_block.get("address") or {}
+            rcpt_company = recipient_block.get("companyName") or ""
+            rcpt_person = recipient_block.get("personName") or ""
             rcpt_street = recipient_addr.get("street") or ""
             rcpt_house = recipient_addr.get("houseNumber") or ""
             rcpt_town = recipient_addr.get("town") or ""
@@ -436,6 +404,14 @@ class BasePlugin:
         if not tf_to:
             tf_to = dwt
 
+        # Who to show depends on role: for something arriving TO you, that's the sender;
+        # for something YOU are sending, restating your own shipment title is not useful,
+        # so identify it by the recipient instead.
+        if role == "receiver":
+            who = sender_company or sender_last or sender_town or ""
+        else:
+            who = rcpt_company or rcpt_person or rcpt_town or sender_company or ""
+
         return {
             "role": role,
             "barcode": barcode,
@@ -445,9 +421,12 @@ class BasePlugin:
             "deliveryDate": deldate,
             "from": tf_from,
             "to": tf_to,
+            "who": who,
             "senderCompany": sender_company,
             "senderLast": sender_last,
             "senderTown": sender_town,
+            "recipientCompany": rcpt_company,
+            "recipientPerson": rcpt_person,
             "recipientStreet": rcpt_street,
             "recipientHouse": rcpt_house,
             "recipientTown": rcpt_town,
@@ -474,9 +453,58 @@ class BasePlugin:
         sender = [self.build_entry(i, "sender", access_token) for i in sender_raw]
         return receiver, sender
 
+
+class BasePlugin:
+    def __init__(self):
+        self.client = None
+        self.debug_enabled = False
+        self.available = True
+        self.poll_interval_minutes = 60
+        self.delivered_days = DEFAULT_DELIVERED_DAYS
+        self.delivered_empty_text = DEFAULT_DELIVERED_EMPTY_TEXT
+        self.i18n = TRANSLATIONS[DEFAULT_LANGUAGE]
+        self.ticks_needed = 1
+        self.tick_count = 0
+
+    # ------------------------------------------------------------------ utils
+    def debug(self, msg):
+        if self.debug_enabled:
+            Domoticz.Debug(str(msg))
+
+    def load_refresh_token(self):
+        try:
+            cfg = Domoticz.Configuration()
+        except Exception:
+            cfg = {}
+        return (cfg or {}).get("refresh_token")
+
+    def save_refresh_token(self, refresh_token):
+        try:
+            cfg = Domoticz.Configuration() or {}
+        except Exception:
+            cfg = {}
+        if refresh_token:
+            cfg["refresh_token"] = refresh_token
+        else:
+            cfg.pop("refresh_token", None)
+        try:
+            Domoticz.Configuration(cfg)
+        except Exception as e:
+            Domoticz.Error("Failed to save refresh token: {}".format(e))
+
+    @staticmethod
+    def _fmt_time(iso_ts):
+        m = re.search(r"T(\d{2}:\d{2})", iso_ts or "")
+        return m.group(1) if m else ""
+
+    @staticmethod
+    def _fmt_short_date(iso_ts):
+        m = re.search(r"\d{4}-(\d{2})-(\d{2})", iso_ts or "")
+        return "{}/{}".format(m.group(2), m.group(1)) if m else ""
+
     # ------------------------------------------------------------- devices
     def format_line(self, e):
-        who = e["senderCompany"] or e["senderLast"] or e["recipientTown"] or self.i18n["unknown_sender"]
+        who = e["who"] or self.i18n["unknown_sender"]
         status_label = self.i18n["status"].get(e["status"], e["status"])
 
         date = ""
@@ -522,7 +550,8 @@ class BasePlugin:
         text_delivered = "\n".join(delivered_lines) or self.delivered_empty_text
         Devices[UNIT_DELIVERED_LIST].Update(nValue=0, sValue=text_delivered[:400])
 
-        sent_lines = [self.format_line(e) for e in self._pending_entries(sender) + self._recent_delivered(sender)]
+        sent_entries = (self._pending_entries(sender) + self._recent_delivered(sender))[:MAX_TEXT_LINES]
+        sent_lines = [self.format_line(e) for e in sent_entries]
         text_out = "\n".join(sent_lines) or self.i18n["no_sent"]
         Devices[UNIT_SENT].Update(nValue=0, sValue=text_out[:400])
 
@@ -538,19 +567,24 @@ class BasePlugin:
     def run_update(self):
         self.debug("Starting PostNL update")
         try:
-            access_token = self.get_access_token()
+            access_token = self.client.get_access_token()
+            self.save_refresh_token(self.client.refresh_token)
             try:
-                receiver, sender = self.fetch_shipments(access_token)
+                receiver, sender = self.client.fetch_shipments(access_token)
             except PostNLAuthError:
                 self.debug("Access token expired while fetching, logging in again.")
-                access_token = self.get_access_token(force_full=True)
-                receiver, sender = self.fetch_shipments(access_token)
+                access_token = self.client.get_access_token(force_full=True)
+                self.save_refresh_token(self.client.refresh_token)
+                receiver, sender = self.client.fetch_shipments(access_token)
             self.update_devices(receiver, sender)
             self.debug(
                 "PostNL update succeeded: {} incoming, {} sent".format(len(receiver), len(sender))
             )
         except Exception as e:
-            Domoticz.Error("PostNL update failed: {}".format(e))
+            if self.debug_enabled:
+                Domoticz.Error("PostNL update failed: {}\n{}".format(e, traceback.format_exc()))
+            else:
+                Domoticz.Error("PostNL update failed: {}".format(e))
 
     # --------------------------------------------------------- Domoticz hooks
     def onStart(self):
@@ -564,9 +598,6 @@ class BasePlugin:
             )
             self.available = False
             return
-
-        self.username = Parameters.get("Username")
-        self.password = Parameters.get("Password")
 
         try:
             self.poll_interval_minutes = int(Parameters.get("PollMinutes") or 60)
@@ -601,7 +632,12 @@ class BasePlugin:
         if UNIT_DELIVERED_LIST not in Devices:
             Domoticz.Device(Name="Packages Delivery", Unit=UNIT_DELIVERED_LIST, TypeName="Text").Create()
 
-        self.load_refresh_token()
+        self.client = PostNLClient(
+            username=Parameters.get("Username"),
+            password=Parameters.get("Password"),
+            refresh_token=self.load_refresh_token(),
+            log_debug=self.debug,
+        )
 
         Domoticz.Heartbeat(HEARTBEAT_SECONDS)
         self.ticks_needed = max(1, (self.poll_interval_minutes * 60) // HEARTBEAT_SECONDS)
