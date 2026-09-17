@@ -593,13 +593,13 @@ class BasePlugin:
                 Options={"Custom": "1;packages"}
             ).Create()
         if UNIT_INBOX not in Devices:
-            Domoticz.Device(Name="Incoming packages", Unit=UNIT_INBOX, TypeName="Text").Create()
+            Domoticz.Device(Name="Packages Incoming", Unit=UNIT_INBOX, TypeName="Text").Create()
         if UNIT_SENT not in Devices:
-            Domoticz.Device(Name="Sent packages", Unit=UNIT_SENT, TypeName="Text").Create()
+            Domoticz.Device(Name="Packages Sent", Unit=UNIT_SENT, TypeName="Text").Create()
         if UNIT_DELIVERED_TODAY not in Devices:
-            Domoticz.Device(Name="Delivered today", Unit=UNIT_DELIVERED_TODAY, TypeName="Switch").Create()
+            Domoticz.Device(Name="Delivered Today", Unit=UNIT_DELIVERED_TODAY, TypeName="Switch").Create()
         if UNIT_DELIVERED_LIST not in Devices:
-            Domoticz.Device(Name="Delivered packages", Unit=UNIT_DELIVERED_LIST, TypeName="Text").Create()
+            Domoticz.Device(Name="Packages Delivery", Unit=UNIT_DELIVERED_LIST, TypeName="Text").Create()
 
         self.load_refresh_token()
 
