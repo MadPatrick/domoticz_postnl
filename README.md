@@ -1,83 +1,95 @@
-# Domoticz PostNL Pakket Tracking plugin
+# Domoticz PostNL Package Tracking plugin
 
-Portering van de Toon-app [postnl](https://github.com/ToonSoftwareCollective/postnl)
-(ToonSoftwareCollective) naar een Domoticz Python-plugin. Logt in op je PostNL-account
-en toont inkomende/verzonden zendingen (Track & Trace) als Domoticz-devices.
+A port of the Toon app [postnl](https://github.com/ToonSoftwareCollective/postnl)
+(ToonSoftwareCollective) to a Domoticz Python plugin. It logs in to your PostNL account
+and shows incoming and sent shipments (Track & Trace) as Domoticz devices.
 
-## Wat je krijgt
+**Version 0.2.2** - early release. Feedback and ideas are very welcome, see
+[Feedback](#feedback).
 
-Na installatie verschijnen 5 devices (namen in het Engels, de tekst erin volgt de taalkeuze),
-elk met maximaal 10 regels, één pakket per regel in de vorm `[dd/mm] wie: status tijd(en)`,
-bijvoorbeeld `[06/08] bol: Onderweg 11:00-13:30`:
+## What you get
 
-- **Packages in transit** — teller met het aantal inkomende pakketten dat nog niet bezorgd/retour is.
-- **Packages Incoming** — alleen de pakketten die nog niet zijn bezorgd, gesorteerd op wanneer
-  ze worden verwacht.
-- **Packages Delivery** — pakketten die al zijn bezorgd, tot een instelbaar aantal dagen terug
-  (zie parameter "Show delivered for (days)" bij de hardware-instellingen, standaard 2), nieuwste
-  eerst. De tekst die verschijnt als er niets bezorgd is, is zelf ook instelbaar (parameter
-  "Text shown when nothing was delivered", standaard "Niets onderweg").
-- **Packages Sent** — zelfde indeling (nog niet bezorgd + recent bezorgd, samen ook max. 10
-  regels), maar voor pakketten die jij verstuurt. Hier toont "wie" de ontvanger (bedrijf/naam/
-  plaats) in plaats van de afzender, want die ben je bij verzonden pakketten zelf.
-- **Delivered Today** — schakelaar (On/Off), alleen-lezen indicator of er vandaag iets is bezorgd.
+After installation 5 devices appear (device names are in English, the text inside follows the
+selected language). Each text device holds at most 10 lines, one package per line, in the form
+`[dd/mm] who: status time(s)`, for example `[06/08] bol: In transit 11:00-13:30`:
 
-De plugin zelf (logs, interne code) is volledig in het Engels. Welke taal de tekst in de
-devices gebruikt (statuswoorden zoals "Onderweg"/"In transit", "Bezorgd"/"Delivered", lege-lijst
-teksten) stel je apart in via de parameter **"Device text language"** (Engels of Nederlands).
+- **Packages in transit** - counter with the number of incoming packages that have not yet
+  been delivered or returned.
+- **Packages Incoming** - only the packages that have not been delivered yet, sorted by
+  expected delivery date.
+- **Packages Delivered** - packages that have already been delivered, up to a configurable
+  number of days back (hardware setting "Show delivered for (days)", default 2), newest first.
+  The text shown when nothing was delivered can also be set (hardware setting "Text shown when
+  nothing was delivered", default "Niets onderweg").
+- **Packages Sent** - same layout (not yet delivered + recently delivered, together also max.
+  10 lines), but for packages you send yourself. Here "who" shows the recipient
+  (company/name/town) instead of the sender, because for outgoing packages you are the sender.
+- **Delivered Today** - switch (On/Off), a read-only indicator that shows whether anything was
+  delivered today.
 
-## Vereisten
+The plugin itself (logs, internal code) is entirely in English. The language of the device
+text (status words such as "In transit"/"Onderweg", "Delivered"/"Bezorgd", empty-list texts)
+is set separately with the **"Device text language"** setting (English or Dutch).
 
-- Domoticz met Python-plugin support, én met "Extended Plugin Settings" (vrije parameter-
-  velden, `type="number"`/`type="boolean"`, `<group>`). Dit zit op moment van schrijven alleen
-  in de `development`-branch van Domoticz, nog niet in een stable release. Op een oudere
-  Domoticz-versie worden de velden "Interval (minuten)", "Bezorgd tonen (dagen)" en "Debug"
-  niet correct getoond/opgeslagen — gebruik dan een build van vóór deze wijziging (zie git-
-  historie) die met de klassieke Mode1/Mode2/Mode6-dropdowns werkt.
-- Python-module `requests` beschikbaar voor de Python die Domoticz gebruikt:
+## Requirements
+
+- Domoticz with Python plugin support and "Extended Plugin Settings" (free parameter fields,
+  `type="number"`/`type="boolean"`, `<group>`). At the time of writing this is only available
+  in the `development` branch of Domoticz, not yet in a stable release. On an older Domoticz
+  version the fields "Poll interval (minutes)", "Show delivered for (days)" and "Debug" are not
+  displayed or stored correctly - in that case use a build from before this change (see the git
+  history) that works with the classic Mode1/Mode2/Mode6 dropdowns.
+- The Python module `requests`, available to the Python that Domoticz uses:
   ```bash
   sudo pip3 install requests
   ```
-- Een PostNL-account (jouw.postnl.nl) met minstens één gevolgd pakket.
+- A PostNL account (jouw.postnl.nl) with at least one tracked package.
 
-## Installatie
+## Installation
 
-1. Clone (of kopieer) deze repository in de Domoticz `plugins`-map, bijvoorbeeld:
+1. Clone (or copy) this repository into the Domoticz `plugins` folder, for example:
    ```bash
    cd /home/pi/domoticz/plugins
    git clone https://github.com/MadPatrick/domoticz_postnl.git PostNL
    ```
-2. Herstart Domoticz (nodig zodat de plugin wordt gedetecteerd):
+2. Restart Domoticz (required so the plugin is detected):
    ```bash
    sudo systemctl restart domoticz
    ```
-3. Ga in Domoticz naar **Instellingen → Hardware** en voeg nieuwe hardware toe van het
-   type **PostNL Package Tracking**.
-4. Vul je PostNL e-mailadres en wachtwoord in, kies een interval (standaard 60 minuten),
-   hoeveel dagen bezorgde pakketten getoond moeten worden (standaard 2), de gewenste taal
-   voor de device-teksten, en eventueel een eigen tekst voor "niets bezorgd" — en sla op.
-5. De 5 devices verschijnen onder **Instellingen → Apparaten** (evt. eerst "toegevoegd"
-   filter gebruiken) — zet ze op je dashboard.
+3. In Domoticz go to **Setup -> Hardware** and add new hardware of the type
+   **PostNL Package Tracking**.
+4. Enter your PostNL e-mail address and password, choose a poll interval (default 60 minutes),
+   how many days delivered packages should stay visible (default 2), the language for the
+   device text, and optionally your own text for "nothing delivered" - then save.
+5. The 5 devices appear under **Setup -> Devices** (you may need to use the "add" filter
+   first) - put them on your dashboard.
 
-## Belangrijk om te weten
+## Good to know
 
-- **Geen officiële API.** Het inloggen gebruikt dezelfde (niet-officiële, reverse-engineered)
-  Akamai/Janrain hosted-login flow als de originele Toon-app. Als PostNL hun inlogproces
-  wijzigt, kan de plugin stuk gaan totdat hij wordt bijgewerkt.
-- **Wachtwoord opslag.** Je PostNL-wachtwoord staat, net als bij elke Domoticz hardware-plugin,
-  in de Domoticz-database (versleuteld veld in de hardware-instellingen). De plugin stuurt het
-  alleen naar PostNL zelf, nergens anders heen.
-- **Niet te vaak opvragen.** Kies geen interval korter dan 15 minuten — te vaak inloggen kan
-  door PostNL als verdacht worden gezien.
-- **Refresh token.** Na de eerste succesvolle login wordt een refresh-token onthouden
-  (opgeslagen in de Domoticz plugin-configuratie, niet in een los bestand), zodat niet
-  elke ronde een volledige login nodig is.
-- De HTTP-calls naar PostNL gebeuren synchroon (via `requests`) tijdens de heartbeat-tick
-  waarop wordt bijgewerkt; dit duurt doorgaans enkele seconden.
+- **No official API.** The login uses the same unofficial, reverse-engineered Akamai/Janrain
+  hosted-login flow as the original Toon app. If PostNL changes their login process, the
+  plugin may break until it is updated.
+- **Password storage.** Like with any Domoticz hardware plugin, your PostNL password is stored
+  in the Domoticz database (as an encrypted field in the hardware settings). The plugin only
+  sends it to PostNL itself, nowhere else.
+- **Do not poll too often.** Do not choose an interval shorter than 15 minutes - logging in too
+  often may be seen as suspicious by PostNL.
+- **Refresh token.** After the first successful login a refresh token is remembered (stored in
+  the Domoticz plugin configuration, not in a separate file), so that not every update needs a
+  full login.
+- The HTTP calls to PostNL are made synchronously (via `requests`) during the heartbeat tick on
+  which the update runs; this usually takes a few seconds.
 
 ## Troubleshooting
 
-Zet **Debug** aan bij de hardware-instellingen en bekijk de Domoticz-log voor gedetailleerde
-foutmeldingen (login-stappen, HTTP-statuscodes). Bij herhaalde login-fouten: log handmatig in
-op jouw.postnl.nl om te controleren of PostNL bijvoorbeeld een CAPTCHA of 2FA vraagt — dat kan
-deze niet-interactieve flow niet afhandelen.
+Enable **Debug** in the hardware settings and check the Domoticz log for detailed error
+messages (login steps, HTTP status codes). On repeated login errors: log in manually at
+jouw.postnl.nl to check whether PostNL asks for a CAPTCHA or 2FA, which this non-interactive
+flow cannot handle.
+
+## Feedback
+
+This is an early release, so rough edges are to be expected. Feedback is very welcome:
+does the login work for you, are packages shown wrong or missing, did you run into errors?
+Ideas for extensions are welcome too. Please open an issue on GitHub or reply on the
+Domoticz forum.

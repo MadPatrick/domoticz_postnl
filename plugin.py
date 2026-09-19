@@ -1,5 +1,5 @@
 """
-<plugin key="PostNL" name="PostNL Package Tracking" author="patrick" version="1.2.2" externallink="https://github.com/ToonSoftwareCollective/postnl">
+<plugin key="PostNL" name="PostNL Package Tracking" author="patrick" version="0.2.2" externallink="https://github.com/ToonSoftwareCollective/postnl">
     <description>
         <h2>PostNL Package Tracking</h2>
         <p>Shows incoming and outgoing PostNL shipments (Track &amp; Trace) from your PostNL account.</p>
