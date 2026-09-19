@@ -4,7 +4,7 @@ A port of the Toon app [postnl](https://github.com/ToonSoftwareCollective/postnl
 (ToonSoftwareCollective) to a Domoticz Python plugin. It logs in to your PostNL account
 and shows incoming and sent shipments (Track & Trace) as Domoticz devices.
 
-**Version 0.2.2** - early release. Feedback and ideas are very welcome, see
+**Version 1.0.0** - first release. Feedback and ideas are very welcome, see
 [Feedback](#feedback).
 
 ## What you get
