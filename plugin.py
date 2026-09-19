@@ -1,7 +1,7 @@
 """
-<plugin key="PostNL" name="PostNL Package Tracking" author="patrick" version="1.2.2" externallink="https://github.com/ToonSoftwareCollective/postnl">
+<plugin key="PostNL" name="PostNL Package Tracking" author="patrick" version="1.0.0" externallink="https://github.com/ToonSoftwareCollective/postnl">
     <description>
-        <h2>PostNL Package Tracking</h2>
+        <h2>PostNL Package Tracking v1.0.0</h2>
         <p>Shows incoming and outgoing PostNL shipments (Track &amp; Trace) from your PostNL account.</p>
         <p>Ported from the Toon app <i>postnl</i> (ToonSoftwareCollective) to a Domoticz plugin.</p>
         <h3>Requirements</h3>
