@@ -1,23 +1,26 @@
 """
-<plugin key="PostNL" name="PostNL Package Tracking" author="patrick" version="1.0.0" externallink="https://github.com/ToonSoftwareCollective/postnl">
+<plugin key="PostNL" name="PostNL &amp; DHL Package Tracking" author="patrick" version="1.1.0" externallink="https://github.com/MadPatrick/domoticz_postnl">
     <description>
-        <h2>PostNL Package Tracking v1.0.0</h2>
-        <p>Shows incoming and outgoing PostNL shipments (Track &amp; Trace) from your PostNL account.</p>
-        <p>Ported from the Toon app <i>postnl</i> (ToonSoftwareCollective) to a Domoticz plugin.</p>
+        <h2>PostNL &amp; DHL Package Tracking v1.1.0</h2>
+        <p>Shows incoming and outgoing PostNL and DHL shipments (Track &amp; Trace) from your PostNL and/or My DHL account.</p>
+        <p>PostNL part ported from the Toon app <i>postnl</i> (ToonSoftwareCollective) to a Domoticz plugin.</p>
         <h3>Requirements</h3>
         <ul style="list-style-type:square">
-            <li>A PostNL account (jouw.postnl.nl)</li>
+            <li>A PostNL account (jouw.postnl.nl) and/or a My DHL account (my.dhlecommerce.nl). Fill in at least one of the two.</li>
             <li>Python module 'requests' (pip3 install requests)</li>
         </ul>
         <h3>Notes</h3>
         <ul style="list-style-type:square">
-            <li>This plugin uses an unofficial, reverse-engineered login flow. If PostNL changes their login process, the plugin may stop working.</li>
+            <li>This plugin uses unofficial, reverse-engineered login flows. If PostNL or DHL change their login process, the plugin may stop working.</li>
             <li>Do not poll too often (15 minute minimum interval) to avoid your account being flagged.</li>
+            <li>DHL: only DHL eCommerce (DHL Parcel NL) parcels that show up in your My DHL account are tracked, not DHL Express.</li>
         </ul>
     </description>
     <params>
-        <param field="Username" label="PostNL e-mail address" width="300px" required="true"/>
-        <param field="Password" label="PostNL password" width="300px" required="true" password="true"/>
+        <param field="Username" label="PostNL e-mail address (empty = skip PostNL)" width="300px"/>
+        <param field="Password" label="PostNL password" width="300px" password="true"/>
+        <param field="DHLUsername" label="My DHL e-mail address (empty = skip DHL)" width="300px"/>
+        <param field="DHLPassword" label="My DHL password" width="300px" password="true"/>
         <param field="PollMinutes" type="number" label="Poll interval (minutes)" min="15" max="720" step="15" default="60" width="100px"/>
         <param field="DeliveredDays" type="number" label="Show delivered for (days)" min="1" max="30" step="1" default="2" width="100px"/>
         <param field="Language" label="Device text language" width="150px">
@@ -34,6 +37,7 @@
 </plugin>
 """
 import base64
+import datetime
 import hashlib
 import re
 import secrets
@@ -68,6 +72,60 @@ GRAPHQL_QUERY = (
     "} }"
 )
 
+# ---- DHL eCommerce NL (My DHL) consumer API, same endpoints as my.dhlecommerce.nl ----
+DHL_LOGIN_URL = "https://my.dhlecommerce.nl/api/user/login"
+DHL_PARCELS_URL = "https://my.dhlecommerce.nl/receiver-parcel-api/parcels"
+DHL_SENT_URL = "https://my.dhlecommerce.nl/api/orders/sentShipments"
+DHL_XSRF_COOKIE = "XSRF-TOKEN"
+DHL_XSRF_HEADER = "x-xsrf-token"
+
+# Granular DHL statuses that mean "ready to collect at a ServicePoint / locker".
+DHL_PICKUP_STATUSES = {
+    "NOTIFICATION_FOR_PARCELSHOP_COLLECTION_HAS_BEEN_SENT",
+    "NOTIFICATION_FOR_PARCELSTATION_COLLECTION_HAS_BEEN_SENT",
+    "AWAITING_RECEIVER_COLLECTION",
+    "CLOSED_AWAITING_COLLECTION",
+    "DELIVERED_AT_ACCESSPOINT",
+    "DELIVERED_AT_PARCELSTATION",
+    "DELIVERY_CODE_MISSING_PICK_UP",
+    "ON_HOLD_FOR_COLLECTION",
+    "PARCEL_FOUND_AT_PARCELSHOP",
+    "PARCEL_HELD_FOR_COLLECTION_AT_LOCAL_DEPOT",
+    "REMINDER_FOR_COLLECTION_SENT_EMAIL",
+    "REMINDER_FOR_COLLECTION_SENT_LETTER",
+    "REMINDER_FOR_COLLECTION_SENT_SMS",
+}
+# Granular DHL statuses that mean the parcel failed and goes back to the sender.
+DHL_RETURN_STATUSES = {
+    "ADDRESS_UNKNOWN",
+    "CUSTOMS_DATA_INCORRECT_RETURN_TO_SHIPPER",
+    "DAMAGE_RETURN",
+    "DELIVERED_AT_SHIPPER",
+    "DELIVERY_CODE_MISSING_RETURN",
+    "DELIVERY_DATA_INCORRECT_RETURN",
+    "INTERVENTION_RECEIVER_REQUEST_DELIVERY_CANCELLED",
+    "INTERVENTION_SHIPPER_REQUEST_DELIVERY_CANCELLED",
+    "MISROUTED_RETURN_TO_SHIPPER",
+    "NOT_HOME_RETURN_TO_SHIPPER",
+    "ON_ROUTE_TO_SHIPPER",
+    "PARCEL_ALREADY_RETURNED",
+    "PARCEL_RELABELED_FOR_RETURN_TO_SHIPPER",
+    "PARCEL_SCANNED_AT_RETURN_HUB",
+    "POSTAL_CODE_INCORRECT",
+    "RECEIVER_RETURN",
+    "RECEIVER_UNKNOWN_RETURN",
+    "REFUSED_AT_PARCELSHOP",
+    "REFUSED_BY_RECEIVER",
+    "REFUSED_NOT_COLLECTED",
+    "REFUSED_RETURN",
+    "RETURNED_NOT_COLLECTED",
+    "RETURNED_TO_SHIPPER",
+    "STORAGE_PERIOD_ENDED_AT_ACCESSPOINT",
+    "STORAGE_PERIOD_ENDED_AT_PARCELSHOP",
+    "STORAGE_PERIOD_ENDED_AT_PARCELSTATION",
+}
+DHL_PROBLEM_CATEGORIES = {"INTERVENTION", "EXCEPTION", "PROBLEM"}
+
 DEFAULT_LANGUAGE = "en"
 TRANSLATIONS = {
     "en": {
@@ -76,6 +134,8 @@ TRANSLATIONS = {
             "InTransit": "In transit",
             "Delivered": "Delivered",
             "ReturnToSender": "Returned to sender",
+            "AtPickupPoint": "Ready for pickup",
+            "Problem": "Delayed",
         },
         "unknown_sender": "Unknown",
         "no_pending": "Nothing on the way",
@@ -87,6 +147,8 @@ TRANSLATIONS = {
             "InTransit": "Onderweg",
             "Delivered": "Bezorgd",
             "ReturnToSender": "Retour afzender",
+            "AtPickupPoint": "Klaar om op te halen",
+            "Problem": "Vertraagd",
         },
         "unknown_sender": "Onbekend",
         "no_pending": "Geen pakketten onderweg",
@@ -413,6 +475,7 @@ class PostNLClient:
             who = rcpt_company or rcpt_person or rcpt_town or sender_company or ""
 
         return {
+            "carrier": "PostNL",
             "role": role,
             "barcode": barcode,
             "shipmentType": stype,
@@ -454,9 +517,165 @@ class PostNLClient:
         return receiver, sender
 
 
+class DHLError(Exception):
+    pass
+
+
+class DHLAuthError(DHLError):
+    pass
+
+
+class DHLClient:
+    """Talks to the (unofficial) consumer API behind my.dhlecommerce.nl: a plain JSON
+    login that sets session cookies, then the incoming-parcels and sent-shipments
+    lists. Only covers DHL eCommerce NL (DHL Parcel), not DHL Express. Like
+    PostNLClient it has no Domoticz dependency."""
+
+    def __init__(self, username, password, log_debug=None):
+        self.username = username
+        self.password = password
+        self._log_debug = log_debug or (lambda msg: None)
+        self.session = None
+
+    def _debug(self, msg):
+        self._log_debug(msg)
+
+    # ------------------------------------------------------------- login
+    def login(self):
+        session = requests.Session()
+        session.headers.update({"User-Agent": USER_AGENT, "Accept": "application/json"})
+        r = session.post(
+            DHL_LOGIN_URL,
+            json={"email": self.username, "password": self.password},
+            timeout=20,
+        )
+        if r.status_code in (401, 403):
+            raise DHLError("DHL rejected the username/password (status {}).".format(r.status_code))
+        if r.status_code != 200:
+            raise DHLError("DHL login failed (status {}).".format(r.status_code))
+        self.session = session
+        self._debug("DHL login succeeded.")
+
+    def _get_json(self, url, params=None):
+        headers = {}
+        for c in self.session.cookies:
+            if c.name == DHL_XSRF_COOKIE:
+                headers[DHL_XSRF_HEADER] = c.value
+        r = self.session.get(url, params=params, headers=headers, timeout=20)
+        if r.status_code in (401, 403):
+            raise DHLAuthError("Unauthorized")
+        if r.status_code != 200:
+            raise DHLError("DHL request failed (status {}).".format(r.status_code))
+        return r.json()
+
+    def _get_with_relogin(self, url, params=None):
+        if self.session is None:
+            self.login()
+        try:
+            return self._get_json(url, params)
+        except DHLAuthError:
+            self._debug("DHL session expired, logging in again.")
+            self.login()
+            return self._get_json(url, params)
+
+    # ------------------------------------------------------------- mapping
+    @staticmethod
+    def _to_local_iso(ts):
+        """DHL timestamps are UTC ('...Z'); convert to local time so the time shown on the
+        device and the date comparisons match the PostNL entries."""
+        if not ts:
+            return ""
+        try:
+            dt = datetime.datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        except ValueError:
+            return str(ts)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        return dt.astimezone().strftime("%Y-%m-%dT%H:%M:%S")
+
+    @classmethod
+    def _window(cls, item):
+        ind = item.get("receivingTimeIndication") or {}
+        itype = ind.get("indicationType")
+        if itype == "MomentIndication":
+            return cls._to_local_iso(ind.get("moment")), ""
+        if itype == "IntervalIndication":
+            return cls._to_local_iso(ind.get("start")), cls._to_local_iso(ind.get("end"))
+        return "", ""
+
+    @staticmethod
+    def _map_status(item, window_from):
+        raw_status = item.get("status") or ""
+        category = item.get("category") or ""
+        if category == "DELIVERED":
+            return "Delivered"
+        if raw_status in DHL_RETURN_STATUSES:
+            return "ReturnToSender"
+        if raw_status in DHL_PICKUP_STATUSES:
+            return "AtPickupPoint"
+        if category in DHL_PROBLEM_CATEGORIES and not raw_status.startswith(
+            "INTERVENTION_RECEIVER_REQUESTS_DELIVERY"
+        ):
+            return "Problem"
+        return "Open" if window_from else "InTransit"
+
+    @staticmethod
+    def _party_name(block):
+        block = block or {}
+        return block.get("name") or (block.get("address") or {}).get("city") or ""
+
+    def build_entry(self, item, role):
+        w_from, w_to = self._window(item)
+        status = self._map_status(item, w_from)
+        destination = item.get("destination") or {}
+        pickup = destination.get("name") if destination.get("locationType") == "SERVICEPOINT" else ""
+        if role == "receiver":
+            who = self._party_name(item.get("sender"))
+        else:
+            who = self._party_name(item.get("receiver")) or self._party_name(item.get("sender"))
+        delivered = status == "Delivered"
+        return {
+            "carrier": "DHL",
+            "role": role,
+            "barcode": item.get("barcode") or "",
+            "shipmentType": item.get("type") or "",
+            "title": "",
+            "status": status,
+            "deliveryDate": w_from if delivered else "",
+            "from": "" if delivered else w_from,
+            "to": "" if delivered else w_to,
+            "who": who,
+            "pickupLocation": pickup or "",
+        }
+
+    # ------------------------------------------------------------- data
+    def fetch_shipments(self):
+        parcels_payload = self._get_with_relogin(DHL_PARCELS_URL)
+        parcels = (parcels_payload or {}).get("parcels") or []
+        try:
+            sent_payload = self._get_with_relogin(DHL_SENT_URL, params={"max": 250})
+        except Exception as e:
+            # sent shipments are a nice-to-have; never lose the incoming list over them
+            self._debug("DHL sent shipments lookup failed: {}".format(e))
+            sent_payload = []
+        sent = [s for s in (sent_payload if isinstance(sent_payload, list) else [])
+                if (s.get("type") or "outgoing") == "outgoing"]
+
+        receiver = [self.build_entry(p, "receiver") for p in parcels if not p.get("isReturn")]
+        # A return you ship back (webshop return label) is listed among the incoming parcels
+        # with isReturn=true; for this plugin it is something you send, so it goes to "Sent".
+        sender = [self.build_entry(p, "sender") for p in parcels if p.get("isReturn")]
+        sender += [self.build_entry(s, "sender") for s in sent]
+        return receiver, sender
+
+
 class BasePlugin:
     def __init__(self):
         self.client = None
+        self.dhl_client = None
+        # last successful result per carrier: {"PostNL": (receiver, sender), "DHL": (...)}
+        # so a failing carrier keeps its last known packages instead of emptying the devices
+        self.results = {}
         self.debug_enabled = False
         self.available = True
         self.poll_interval_minutes = 60
@@ -505,6 +724,9 @@ class BasePlugin:
     # ------------------------------------------------------------- devices
     def format_line(self, e):
         who = e["who"] or self.i18n["unknown_sender"]
+        if self.client is not None and self.dhl_client is not None:
+            # both carriers active: tell them apart on the device
+            who = "{} ({})".format(who, e.get("carrier") or "?")
         status_label = self.i18n["status"].get(e["status"], e["status"])
 
         date = ""
@@ -564,27 +786,64 @@ class BasePlugin:
         )
 
     # --------------------------------------------------------------- run
-    def run_update(self):
+    def _report_error(self, carrier, e):
+        if self.debug_enabled:
+            Domoticz.Error("{} update failed: {}\n{}".format(carrier, e, traceback.format_exc()))
+        else:
+            Domoticz.Error("{} update failed: {}".format(carrier, e))
+
+    def update_postnl(self):
         self.debug("Starting PostNL update")
+        access_token = self.client.get_access_token()
+        self.save_refresh_token(self.client.refresh_token)
         try:
-            access_token = self.client.get_access_token()
+            receiver, sender = self.client.fetch_shipments(access_token)
+        except PostNLAuthError:
+            self.debug("Access token expired while fetching, logging in again.")
+            access_token = self.client.get_access_token(force_full=True)
             self.save_refresh_token(self.client.refresh_token)
+            receiver, sender = self.client.fetch_shipments(access_token)
+        self.debug(
+            "PostNL update succeeded: {} incoming, {} sent".format(len(receiver), len(sender))
+        )
+        return receiver, sender
+
+    def update_dhl(self):
+        self.debug("Starting DHL update")
+        receiver, sender = self.dhl_client.fetch_shipments()
+        self.debug(
+            "DHL update succeeded: {} incoming, {} sent".format(len(receiver), len(sender))
+        )
+        return receiver, sender
+
+    def run_update(self):
+        carriers = []
+        if self.client is not None:
+            carriers.append(("PostNL", self.update_postnl))
+        if self.dhl_client is not None:
+            carriers.append(("DHL", self.update_dhl))
+
+        any_ok = False
+        for name, fetch in carriers:
             try:
-                receiver, sender = self.client.fetch_shipments(access_token)
-            except PostNLAuthError:
-                self.debug("Access token expired while fetching, logging in again.")
-                access_token = self.client.get_access_token(force_full=True)
-                self.save_refresh_token(self.client.refresh_token)
-                receiver, sender = self.client.fetch_shipments(access_token)
+                self.results[name] = fetch()
+                any_ok = True
+            except Exception as e:
+                self._report_error(name, e)
+
+        if not any_ok:
+            # nothing new: leave the devices as they are
+            return
+        receiver = []
+        sender = []
+        for name, _ in carriers:
+            r, s = self.results.get(name, ([], []))
+            receiver += r
+            sender += s
+        try:
             self.update_devices(receiver, sender)
-            self.debug(
-                "PostNL update succeeded: {} incoming, {} sent".format(len(receiver), len(sender))
-            )
         except Exception as e:
-            if self.debug_enabled:
-                Domoticz.Error("PostNL update failed: {}\n{}".format(e, traceback.format_exc()))
-            else:
-                Domoticz.Error("PostNL update failed: {}".format(e))
+            self._report_error("Device", e)
 
     # --------------------------------------------------------- Domoticz hooks
     def onStart(self):
@@ -632,12 +891,34 @@ class BasePlugin:
         if UNIT_DELIVERED_LIST not in Devices:
             Domoticz.Device(Name="Packages Delivered", Unit=UNIT_DELIVERED_LIST, TypeName="Text").Create()
 
-        self.client = PostNLClient(
-            username=Parameters.get("Username"),
-            password=Parameters.get("Password"),
-            refresh_token=self.load_refresh_token(),
-            log_debug=self.debug,
-        )
+        postnl_user = (Parameters.get("Username") or "").strip()
+        postnl_pass = Parameters.get("Password") or ""
+        dhl_user = (Parameters.get("DHLUsername") or "").strip()
+        dhl_pass = Parameters.get("DHLPassword") or ""
+
+        self.client = None
+        self.dhl_client = None
+        if postnl_user and postnl_pass:
+            self.client = PostNLClient(
+                username=postnl_user,
+                password=postnl_pass,
+                refresh_token=self.load_refresh_token(),
+                log_debug=self.debug,
+            )
+        elif postnl_user or postnl_pass:
+            Domoticz.Error("PostNL e-mail address or password is empty; PostNL is skipped.")
+        if dhl_user and dhl_pass:
+            self.dhl_client = DHLClient(username=dhl_user, password=dhl_pass, log_debug=self.debug)
+        elif dhl_user or dhl_pass:
+            Domoticz.Error("My DHL e-mail address or password is empty; DHL is skipped.")
+
+        if self.client is None and self.dhl_client is None:
+            Domoticz.Error("No PostNL or DHL account configured. Fill in at least one in the hardware settings.")
+            self.available = False
+            return
+        Domoticz.Log("Tracking: {}".format(", ".join(
+            name for name, c in (("PostNL", self.client), ("DHL", self.dhl_client)) if c is not None
+        )))
 
         Domoticz.Heartbeat(HEARTBEAT_SECONDS)
         self.ticks_needed = max(1, (self.poll_interval_minutes * 60) // HEARTBEAT_SECONDS)

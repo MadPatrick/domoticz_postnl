@@ -1,17 +1,22 @@
-# Domoticz PostNL Package Tracking plugin
+# Domoticz PostNL & DHL Package Tracking plugin
 
 A port of the Toon app [postnl](https://github.com/ToonSoftwareCollective/postnl)
 (ToonSoftwareCollective) to a Domoticz Python plugin. It logs in to your PostNL account
-and shows incoming and sent shipments (Track & Trace) as Domoticz devices.
+and/or your My DHL account and shows incoming and sent shipments (Track & Trace) as Domoticz
+devices.
 
-**Version 1.0.0** - first release. Feedback and ideas are very welcome, see
+**Version 1.1.0** - adds DHL (DHL eCommerce NL / DHL Parcel, via your My DHL account at
+[my.dhlecommerce.nl](https://my.dhlecommerce.nl)). Feedback and ideas are very welcome, see
 [Feedback](#feedback).
 
 ## What you get
 
 After installation 5 devices appear (device names are in English, the text inside follows the
 selected language). Each text device holds at most 10 lines, one package per line, in the form
-`[dd/mm] who: status time(s)`, for example `[06/08] bol: In transit 11:00-13:30`:
+`[dd/mm] who: status time(s)`, for example `[06/08] bol: In transit 11:00-13:30`. When both
+PostNL and DHL are configured, the carrier is added after the name, for example
+`[06/08] bol (PostNL): In transit 11:00-13:30` and `[06/08] Coolblue (DHL): In transit 10:00-12:00`.
+PostNL and DHL packages are combined in the same devices:
 
 - **Packages in transit** - counter with the number of incoming packages that have not yet
   been delivered or returned.
@@ -43,7 +48,8 @@ is set separately with the **"Device text language"** setting (English or Dutch)
   ```bash
   sudo pip3 install requests
   ```
-- A PostNL account (jouw.postnl.nl) with at least one tracked package.
+- A PostNL account (jouw.postnl.nl) and/or a My DHL account (my.dhlecommerce.nl). Fill in at
+  least one of the two; leave the other one empty to skip that carrier.
 
 ## Installation
 
@@ -58,20 +64,37 @@ is set separately with the **"Device text language"** setting (English or Dutch)
    ```
 3. In Domoticz go to **Setup -> Hardware** and add new hardware of the type
    **PostNL Package Tracking**.
-4. Enter your PostNL e-mail address and password, choose a poll interval (default 60 minutes),
+4. Enter your PostNL e-mail address and password and/or your My DHL e-mail address and
+   password, choose a poll interval (default 60 minutes),
    how many days delivered packages should stay visible (default 2), the language for the
    device text, and optionally your own text for "nothing delivered" - then save.
 5. The 5 devices appear under **Setup -> Devices** (you may need to use the "add" filter
    first) - put them on your dashboard.
 
+## DHL
+
+- Which parcels: everything that shows up when you log in at
+  [my.dhlecommerce.nl](https://my.dhlecommerce.nl) - incoming parcels, returns you send back
+  (shown under **Packages Sent**) and parcels you sent yourself. DHL Express shipments are not
+  part of that account and are not tracked.
+- No tracking numbers or API key needed: just like PostNL the plugin reads the list from your
+  account. A parcel only appears once DHL has linked it to your account (usually via your
+  e-mail address or postal code).
+- Extra statuses for DHL: "Ready for pickup" / "Klaar om op te halen" (waiting at a DHL
+  ServicePoint or locker) and "Delayed" / "Vertraagd" (DHL reports a problem or intervention).
+- DHL times are converted from UTC to the local time of the Domoticz server.
+- If one carrier fails (login error, outage), the other one is still updated and the last known
+  packages of the failing carrier stay on the devices.
+
 ## Good to know
 
-- **No official API.** The login uses the same unofficial, reverse-engineered Akamai/Janrain
-  hosted-login flow as the original Toon app. If PostNL changes their login process, the
-  plugin may break until it is updated.
-- **Password storage.** Like with any Domoticz hardware plugin, your PostNL password is stored
-  in the Domoticz database (as an encrypted field in the hardware settings). The plugin only
-  sends it to PostNL itself, nowhere else.
+- **No official API.** The PostNL login uses the same unofficial, reverse-engineered
+  Akamai/Janrain hosted-login flow as the original Toon app; the DHL part uses the same
+  (unofficial) JSON API as the my.dhlecommerce.nl website. If PostNL or DHL change their login
+  process, the plugin may break until it is updated.
+- **Password storage.** Like with any Domoticz hardware plugin, your PostNL and DHL passwords are
+  stored in the Domoticz database (as password fields in the hardware settings). The plugin only
+  sends them to PostNL and DHL themselves, nowhere else.
 - **Do not poll too often.** Do not choose an interval shorter than 15 minutes - logging in too
   often may be seen as suspicious by PostNL.
 - **Refresh token.** After the first successful login a refresh token is remembered (stored in
@@ -83,7 +106,8 @@ is set separately with the **"Device text language"** setting (English or Dutch)
 ## Troubleshooting
 
 Enable **Debug** in the hardware settings and check the Domoticz log for detailed error
-messages (login steps, HTTP status codes). On repeated login errors: log in manually at
+messages (login steps, HTTP status codes). Errors are prefixed with the carrier
+(`PostNL update failed: ...` / `DHL update failed: ...`). On repeated login errors: log in manually at
 jouw.postnl.nl to check whether PostNL asks for a CAPTCHA or 2FA, which this non-interactive
 flow cannot handle.
 
