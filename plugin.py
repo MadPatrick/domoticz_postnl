@@ -1,19 +1,21 @@
 """
-<plugin key="PostNL" name="PostNL &amp; DHL Package Tracking" author="patrick" version="1.1.0" externallink="https://github.com/MadPatrick/domoticz_postnl">
+<plugin key="PostNL" name="PostNL, DHL &amp; DPD Package Tracking" author="patrick" version="1.2.0" externallink="https://github.com/MadPatrick/domoticz_postnl">
     <description>
-        <h2>PostNL &amp; DHL Package Tracking v1.1.0</h2>
-        <p>Shows incoming and outgoing PostNL and DHL shipments (Track &amp; Trace) from your PostNL and/or My DHL account.</p>
+        <h2>PostNL, DHL &amp; DPD Package Tracking v1.2.0</h2>
+        <p>Shows incoming and outgoing PostNL, DHL and DPD shipments (Track &amp; Trace) from your PostNL, My DHL and/or myDPD account.</p>
         <p>PostNL part ported from the Toon app <i>postnl</i> (ToonSoftwareCollective) to a Domoticz plugin.</p>
         <h3>Requirements</h3>
         <ul style="list-style-type:square">
-            <li>A PostNL account (jouw.postnl.nl) and/or a My DHL account (my.dhlecommerce.nl). Fill in at least one of the two.</li>
+            <li>A PostNL account (jouw.postnl.nl), a My DHL account (my.dhlecommerce.nl) and/or a myDPD account (the myDPD app / dpdgroup.com). Fill in at least one.</li>
             <li>Python module 'requests' (pip3 install requests)</li>
         </ul>
         <h3>Notes</h3>
         <ul style="list-style-type:square">
-            <li>This plugin uses unofficial, reverse-engineered login flows. If PostNL or DHL change their login process, the plugin may stop working.</li>
+            <li>This plugin uses unofficial, reverse-engineered login flows. If PostNL, DHL or DPD change their login process, the plugin may stop working.</li>
             <li>Do not poll too often (15 minute minimum interval) to avoid your account being flagged.</li>
             <li>DHL: only DHL eCommerce (DHL Parcel NL) parcels that show up in your My DHL account are tracked, not DHL Express.</li>
+            <li>DPD: the parcels in your myDPD account (DPD Netherlands). Accounts that only sign in with Google/Apple/Facebook have no password and cannot be used.</li>
+            <li>UPS is not supported: UPS has no consumer account feed that can be read without a browser login.</li>
         </ul>
     </description>
     <params>
@@ -21,6 +23,8 @@
         <param field="Password" label="PostNL password" width="300px" password="true"/>
         <param field="DHLUsername" label="My DHL e-mail address (empty = skip DHL)" width="300px"/>
         <param field="DHLPassword" label="My DHL password" width="300px" password="true"/>
+        <param field="DPDUsername" label="myDPD e-mail address (empty = skip DPD)" width="300px"/>
+        <param field="DPDPassword" label="myDPD password" width="300px" password="true"/>
         <param field="PollMinutes" type="number" label="Poll interval (minutes)" min="15" max="720" step="15" default="60" width="100px"/>
         <param field="DeliveredDays" type="number" label="Show delivered for (days)" min="1" max="30" step="1" default="2" width="100px"/>
         <param field="Language" label="Device text language" width="150px">
@@ -125,6 +129,22 @@ DHL_RETURN_STATUSES = {
     "STORAGE_PERIOD_ENDED_AT_PARCELSTATION",
 }
 DHL_PROBLEM_CATEGORIES = {"INTERVENTION", "EXCEPTION", "PROBLEM"}
+
+# ---- DPD (myDPD) consumer API, the same chain the myDPD mobile app uses ----
+# Endpoints and the app's public client credentials as documented by the
+# ha-parcel-integrations/ha-dpd Home Assistant integration (shared myDPD backend).
+DPD_KEYCLOAK_URL = "https://login.dpdgroup.com/auth/realms/login/protocol/openid-connect/token"
+DPD_KEYCLOAK_CLIENT_ID = "MOBILE-APP-PROD"
+DPD_BASE_URL = "https://www.dpdgroup.com/concept/webservice"
+DPD_GUEST_TOKEN_URL = DPD_BASE_URL + "/oauth/token"
+DPD_CONSIGNEE_SSO_URL = DPD_BASE_URL + "/users/login/consignee-sso"
+DPD_PARCELS_URL = DPD_BASE_URL + "/v7/parcels"
+DPD_PARCEL_DETAIL_URL = DPD_BASE_URL + "/v10/parcels/details"
+# base64 of the myDPD app's "<client_id>:<client_secret>" (shipped inside the app)
+DPD_BASIC_TOKEN = ("bXlEUEQgTW9iaWxlIEFwcDpaMVdzeTQ4RGpseWcweDdVWjhvWTlYdmZIT2xIbW4yTmpJdnYycmpVVjY3"
+                   "N1hDOGhiTGlkNHY2OWpCQzlvZnpU")
+DPD_USER_AGENT = "okhttp/4.12.0"
+DPD_BU = "DPD-NL"
 
 DEFAULT_LANGUAGE = "en"
 TRANSLATIONS = {
@@ -669,10 +689,231 @@ class DHLClient:
         return receiver, sender
 
 
+class DPDError(Exception):
+    pass
+
+
+class DPDAuthError(DPDError):
+    pass
+
+
+class DPDClient:
+    """Talks to the (unofficial) myDPD consumer API used by the myDPD mobile app:
+    a Keycloak password login, a guest token with the app's own client credentials and a
+    consignee-SSO exchange that yields the DPD user token. With that token the account's
+    incoming and sent parcels are one POST away. Like the other clients it has no Domoticz
+    dependency."""
+
+    def __init__(self, username, password, log_debug=None):
+        self.username = username
+        self.password = password
+        self._log_debug = log_debug or (lambda msg: None)
+        self.token = None
+        # receiver name per barcode for sent parcels (the list itself has none)
+        self._receiver_cache = {}
+
+    def _debug(self, msg):
+        self._log_debug(msg)
+
+    @staticmethod
+    def _json(r):
+        try:
+            return r.json()
+        except ValueError:
+            return {}
+
+    # ------------------------------------------------------------- login
+    def login(self):
+        headers = {"User-Agent": DPD_USER_AGENT}
+        r1 = requests.post(
+            DPD_KEYCLOAK_URL,
+            data={
+                "client_id": DPD_KEYCLOAK_CLIENT_ID,
+                "grant_type": "password",
+                "scope": "openid",
+                "username": self.username,
+                "password": self.password,
+            },
+            headers=headers,
+            timeout=20,
+        )
+        if r1.status_code >= 500:
+            raise DPDError("DPD login failed (status {}).".format(r1.status_code))
+        kc_token = self._json(r1).get("access_token")
+        if not kc_token:
+            body = self._json(r1)
+            reason = body.get("error_description") or body.get("error") or r1.status_code
+            raise DPDError("DPD rejected the username/password ({}).".format(reason))
+
+        r2 = requests.post(
+            DPD_GUEST_TOKEN_URL,
+            params={"grant_type": "client_credentials"},
+            headers={
+                "Authorization": "Basic " + DPD_BASIC_TOKEN,
+                "Content-Type": "application/json",
+                "User-Agent": DPD_USER_AGENT,
+            },
+            timeout=20,
+        )
+        guest_token = self._json(r2).get("access_token")
+        if not guest_token:
+            raise DPDError("DPD guest token request failed (status {}).".format(r2.status_code))
+
+        r3 = requests.post(
+            DPD_CONSIGNEE_SSO_URL,
+            params={"bu": DPD_BU},
+            data=kc_token,
+            headers={
+                "Authorization": "Bearer " + guest_token,
+                "Content-Type": "text/plain",
+                "User-Agent": DPD_USER_AGENT,
+            },
+            timeout=20,
+        )
+        token = self._json(r3).get("access_token")
+        if not token:
+            raise DPDError("DPD consignee-sso did not return a token (status {}).".format(r3.status_code))
+        self.token = token
+        self._debug("DPD login succeeded.")
+
+    def _headers(self):
+        return {
+            "Authorization": "Bearer {}".format(self.token),
+            "Content-Type": "application/json",
+            "User-Agent": DPD_USER_AGENT,
+        }
+
+    def _get_parcels(self):
+        r = requests.post(
+            DPD_PARCELS_URL,
+            params={"bu": DPD_BU, "lang": "en"},
+            json={
+                "incomingParcels": [],
+                "sendingParcels": [],
+                "confirmedParcels": None,
+                "shipmentCollections": [],
+                "confirmedShipmentCollections": None,
+            },
+            headers=self._headers(),
+            timeout=20,
+        )
+        if r.status_code in (401, 403):
+            raise DPDAuthError("Unauthorized")
+        if r.status_code != 200:
+            raise DPDError("DPD parcels request failed (status {}).".format(r.status_code))
+        return self._json(r)
+
+    def _receiver_name(self, barcode):
+        """Best-effort recipient name of a parcel you sent (detail endpoint), cached."""
+        if not barcode:
+            return ""
+        if barcode in self._receiver_cache:
+            return self._receiver_cache[barcode]
+        name = ""
+        try:
+            r = requests.post(
+                "{}/{}".format(DPD_PARCEL_DETAIL_URL, barcode),
+                params={
+                    "parcelType": "SENDING",
+                    "businessUnit": DPD_BU,
+                    "lang": "en",
+                    "continueWithoutVerification": "false",
+                },
+                headers=self._headers(),
+                timeout=20,
+            )
+            if r.status_code == 200:
+                receiver = self._json(r).get("receiver") or {}
+                name = receiver.get("name") or (receiver.get("address") or {}).get("city") or ""
+        except Exception as e:
+            self._debug("DPD detail lookup failed for {}: {}".format(barcode, e))
+            return ""
+        self._receiver_cache[barcode] = name
+        return name
+
+    # ------------------------------------------------------------- mapping
+    @staticmethod
+    def _map_status(item, window_from):
+        description = (item.get("status") or {}).get("description") or ""
+        if description == "DELIVERED":
+            return "Delivered"
+        if description == "RETURN_TO_SENDER":
+            return "ReturnToSender"
+        if description == "AVAILABLE_FOR_COLLECTION":
+            return "AtPickupPoint"
+        if description == "UNSUCCESSFUL_DELIVERY_ATTEMPT":
+            return "Problem"
+        return "Open" if window_from else "InTransit"
+
+    @staticmethod
+    def _window(item):
+        """DPD gives the expected day plus (once known) a local from/to time."""
+        fmp = item.get("fmpDeliveryDateAndTime") or {}
+        rng = fmp.get("timeRange") or {}
+        if fmp.get("deliveryDate") and rng.get("from"):
+            day = fmp["deliveryDate"][:10]
+            return "{}T{}".format(day, rng["from"]), "{}T{}".format(day, rng["to"]) if rng.get("to") else ""
+        day = (item.get("deliveryDate") or "")[:10]
+        if not day:
+            return "", ""
+        t_from = item.get("deliveryTimeFrom") or ""
+        t_to = item.get("deliveryTimeTo") or ""
+        return ("{}T{}".format(day, t_from) if t_from else day,
+                "{}T{}".format(day, t_to) if t_to else "")
+
+    @staticmethod
+    def _delivered_at(item):
+        moment = (item.get("status") or {}).get("eventDateAndTime") or ""
+        return moment or (item.get("deliveryDate") or "")
+
+    def build_entry(self, item, role):
+        w_from, w_to = self._window(item)
+        status = self._map_status(item, w_from)
+        delivered = status == "Delivered"
+        barcode = item.get("parcelNumber") or ""
+        if role == "receiver":
+            who = item.get("senderName") or ""
+        else:
+            who = item.get("receiverName") or ""
+            if not who and not delivered:
+                who = self._receiver_name(barcode)
+        is_shop = (item.get("status") or {}).get("deliveryType") == "PARCELSHOP"
+        return {
+            "carrier": "DPD",
+            "role": role,
+            "barcode": barcode,
+            "shipmentType": item.get("shipmentType") or "",
+            "title": "",
+            "status": status,
+            "deliveryDate": self._delivered_at(item) if delivered else "",
+            "from": "" if delivered else w_from,
+            "to": "" if delivered else w_to,
+            "who": who,
+            "pickupLocation": "ParcelShop" if is_shop else "",
+        }
+
+    # ------------------------------------------------------------- data
+    def fetch_shipments(self):
+        if self.token is None:
+            self.login()
+        try:
+            payload = self._get_parcels()
+        except DPDAuthError:
+            self._debug("DPD session expired, logging in again.")
+            self.login()
+            payload = self._get_parcels()
+        incoming = (payload or {}).get("incomingShipments") or []
+        outgoing = (payload or {}).get("sendingShipments") or []
+        receiver = [self.build_entry(p, "receiver") for p in incoming]
+        sender = [self.build_entry(p, "sender") for p in outgoing]
+        return receiver, sender
+
+
 class BasePlugin:
     def __init__(self):
         self.client = None
         self.dhl_client = None
+        self.dpd_client = None
         # last successful result per carrier: {"PostNL": (receiver, sender), "DHL": (...)}
         # so a failing carrier keeps its last known packages instead of emptying the devices
         self.results = {}
@@ -722,10 +963,14 @@ class BasePlugin:
         return "{}/{}".format(m.group(2), m.group(1)) if m else ""
 
     # ------------------------------------------------------------- devices
+    def _active_carriers(self):
+        return [name for name, c in (("PostNL", self.client), ("DHL", self.dhl_client),
+                                     ("DPD", self.dpd_client)) if c is not None]
+
     def format_line(self, e):
         who = e["who"] or self.i18n["unknown_sender"]
-        if self.client is not None and self.dhl_client is not None:
-            # both carriers active: tell them apart on the device
+        if len(self._active_carriers()) > 1:
+            # several carriers active: tell them apart on the device
             who = "{} ({})".format(who, e.get("carrier") or "?")
         status_label = self.i18n["status"].get(e["status"], e["status"])
 
@@ -816,12 +1061,22 @@ class BasePlugin:
         )
         return receiver, sender
 
+    def update_dpd(self):
+        self.debug("Starting DPD update")
+        receiver, sender = self.dpd_client.fetch_shipments()
+        self.debug(
+            "DPD update succeeded: {} incoming, {} sent".format(len(receiver), len(sender))
+        )
+        return receiver, sender
+
     def run_update(self):
         carriers = []
         if self.client is not None:
             carriers.append(("PostNL", self.update_postnl))
         if self.dhl_client is not None:
             carriers.append(("DHL", self.update_dhl))
+        if self.dpd_client is not None:
+            carriers.append(("DPD", self.update_dpd))
 
         any_ok = False
         for name, fetch in carriers:
@@ -895,9 +1150,12 @@ class BasePlugin:
         postnl_pass = Parameters.get("Password") or ""
         dhl_user = (Parameters.get("DHLUsername") or "").strip()
         dhl_pass = Parameters.get("DHLPassword") or ""
+        dpd_user = (Parameters.get("DPDUsername") or "").strip()
+        dpd_pass = Parameters.get("DPDPassword") or ""
 
         self.client = None
         self.dhl_client = None
+        self.dpd_client = None
         if postnl_user and postnl_pass:
             self.client = PostNLClient(
                 username=postnl_user,
@@ -911,14 +1169,16 @@ class BasePlugin:
             self.dhl_client = DHLClient(username=dhl_user, password=dhl_pass, log_debug=self.debug)
         elif dhl_user or dhl_pass:
             Domoticz.Error("My DHL e-mail address or password is empty; DHL is skipped.")
+        if dpd_user and dpd_pass:
+            self.dpd_client = DPDClient(username=dpd_user, password=dpd_pass, log_debug=self.debug)
+        elif dpd_user or dpd_pass:
+            Domoticz.Error("myDPD e-mail address or password is empty; DPD is skipped.")
 
-        if self.client is None and self.dhl_client is None:
-            Domoticz.Error("No PostNL or DHL account configured. Fill in at least one in the hardware settings.")
+        if not self._active_carriers():
+            Domoticz.Error("No PostNL, DHL or DPD account configured. Fill in at least one in the hardware settings.")
             self.available = False
             return
-        Domoticz.Log("Tracking: {}".format(", ".join(
-            name for name, c in (("PostNL", self.client), ("DHL", self.dhl_client)) if c is not None
-        )))
+        Domoticz.Log("Tracking: {}".format(", ".join(self._active_carriers())))
 
         Domoticz.Heartbeat(HEARTBEAT_SECONDS)
         self.ticks_needed = max(1, (self.poll_interval_minutes * 60) // HEARTBEAT_SECONDS)

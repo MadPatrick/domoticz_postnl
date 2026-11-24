@@ -1,8 +1,8 @@
-# Domoticz PostNL & DHL Package Tracking plugin
+# Domoticz PostNL, DHL & DPD Package Tracking plugin
 
 A port of the Toon app [postnl](https://github.com/ToonSoftwareCollective/postnl)
-(ToonSoftwareCollective) to a Domoticz Python plugin. It logs in to your PostNL account
-and/or your My DHL account and shows incoming and sent shipments (Track & Trace) as Domoticz
+(ToonSoftwareCollective) to a Domoticz Python plugin. It logs in to your PostNL account,
+your My DHL account and/or your myDPD account and shows incoming and sent shipments (Track & Trace) as Domoticz
 devices.
 
 **Version 1.1.0** - adds DHL (DHL eCommerce NL / DHL Parcel, via your My DHL account at
@@ -13,10 +13,10 @@ devices.
 
 After installation 5 devices appear (device names are in English, the text inside follows the
 selected language). Each text device holds at most 10 lines, one package per line, in the form
-`[dd/mm] who: status time(s)`, for example `[06/08] bol: In transit 11:00-13:30`. When both
-PostNL and DHL are configured, the carrier is added after the name, for example
+`[dd/mm] who: status time(s)`, for example `[06/08] bol: In transit 11:00-13:30`. When more than
+one carrier is configured, the carrier is added after the name, for example
 `[06/08] bol (PostNL): In transit 11:00-13:30` and `[06/08] Coolblue (DHL): In transit 10:00-12:00`.
-PostNL and DHL packages are combined in the same devices:
+PostNL, DHL and DPD packages are combined in the same devices:
 
 - **Packages in transit** - counter with the number of incoming packages that have not yet
   been delivered or returned.
@@ -48,8 +48,8 @@ is set separately with the **"Device text language"** setting (English or Dutch)
   ```bash
   sudo pip3 install requests
   ```
-- A PostNL account (jouw.postnl.nl) and/or a My DHL account (my.dhlecommerce.nl). Fill in at
-  least one of the two; leave the other one empty to skip that carrier.
+- A PostNL account (jouw.postnl.nl), a My DHL account (my.dhlecommerce.nl) and/or a myDPD
+  account (myDPD app). Fill in at least one; leave the others empty to skip that carrier.
 
 ## Installation
 
@@ -63,9 +63,9 @@ is set separately with the **"Device text language"** setting (English or Dutch)
    sudo systemctl restart domoticz
    ```
 3. In Domoticz go to **Setup -> Hardware** and add new hardware of the type
-   **PostNL Package Tracking**.
-4. Enter your PostNL e-mail address and password and/or your My DHL e-mail address and
-   password, choose a poll interval (default 60 minutes),
+   **PostNL, DHL & DPD Package Tracking**.
+4. Enter your PostNL e-mail address and password, your My DHL e-mail address and
+   password and/or your myDPD e-mail address and password, choose a poll interval (default 60 minutes),
    how many days delivered packages should stay visible (default 2), the language for the
    device text, and optionally your own text for "nothing delivered" - then save.
 5. The 5 devices appear under **Setup -> Devices** (you may need to use the "add" filter
@@ -86,15 +86,42 @@ is set separately with the **"Device text language"** setting (English or Dutch)
 - If one carrier fails (login error, outage), the other one is still updated and the last known
   packages of the failing carrier stay on the devices.
 
+## DPD
+
+**Version 1.2.0** adds DPD (DPD Netherlands, via your myDPD account - the same account as the
+myDPD app).
+
+- Fill in the myDPD e-mail address and password in the hardware settings. An account that only
+  signs in with Google, Apple or Facebook has no password and cannot be used; set a password in
+  the myDPD app first.
+- Which parcels: everything that shows up in the myDPD app - incoming parcels under the
+  incoming devices, parcels you sent under **Packages Sent**. A parcel appears once DPD has
+  linked it to your account (via your e-mail address or after you added it in the app).
+- No tracking numbers or API key needed. The plugin uses the same (unofficial) login chain as
+  the myDPD mobile app, as documented by the Home Assistant integration
+  [ha-dpd](https://github.com/ha-parcel-integrations/ha-dpd).
+- Extra statuses for DPD: "Ready for pickup" / "Klaar om op te halen" (waiting at a DPD
+  ParcelShop) and "Delayed" / "Vertraagd" (a missed delivery attempt).
+- The delivery time window is shown as soon as DPD knows it (usually on the day of delivery);
+  before that only the expected day is shown.
+
+## UPS
+
+UPS is not supported. UPS has no consumer account (My Choice) feed that can be read without an
+interactive browser login with bot protection, and its public tracking page only works per
+tracking number with a very low request limit. That does not fit a plugin that reads your
+parcels from your account automatically.
+
 ## Good to know
 
 - **No official API.** The PostNL login uses the same unofficial, reverse-engineered
   Akamai/Janrain hosted-login flow as the original Toon app; the DHL part uses the same
-  (unofficial) JSON API as the my.dhlecommerce.nl website. If PostNL or DHL change their login
+  (unofficial) JSON API as the my.dhlecommerce.nl website and the DPD part the (unofficial) API of
+the myDPD app. If PostNL, DHL or DPD change their login
   process, the plugin may break until it is updated.
-- **Password storage.** Like with any Domoticz hardware plugin, your PostNL and DHL passwords are
+- **Password storage.** Like with any Domoticz hardware plugin, your PostNL, DHL and DPD passwords are
   stored in the Domoticz database (as password fields in the hardware settings). The plugin only
-  sends them to PostNL and DHL themselves, nowhere else.
+  sends them to PostNL, DHL and DPD themselves, nowhere else.
 - **Do not poll too often.** Do not choose an interval shorter than 15 minutes - logging in too
   often may be seen as suspicious by PostNL.
 - **Refresh token.** After the first successful login a refresh token is remembered (stored in
@@ -107,7 +134,7 @@ is set separately with the **"Device text language"** setting (English or Dutch)
 
 Enable **Debug** in the hardware settings and check the Domoticz log for detailed error
 messages (login steps, HTTP status codes). Errors are prefixed with the carrier
-(`PostNL update failed: ...` / `DHL update failed: ...`). On repeated login errors: log in manually at
+(`PostNL update failed: ...` / `DHL update failed: ...` / `DPD update failed: ...`). On repeated login errors: log in manually at
 jouw.postnl.nl to check whether PostNL asks for a CAPTCHA or 2FA, which this non-interactive
 flow cannot handle.
 
