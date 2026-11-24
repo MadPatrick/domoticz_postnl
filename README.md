@@ -5,7 +5,8 @@ A port of the Toon app [postnl](https://github.com/ToonSoftwareCollective/postnl
 and/or your My DHL account and shows incoming and sent shipments (Track & Trace) as Domoticz
 devices.
 
-**Version 1.1.0** - adds DHL (DHL eCommerce NL / DHL Parcel, via your My DHL account at
+**Version 1.1.1** - a DHL parcel that My DHL returns more than once is shown only once.
+Version 1.1.0 added DHL (DHL eCommerce NL / DHL Parcel, via your My DHL account at
 [my.dhlecommerce.nl](https://my.dhlecommerce.nl)). Feedback and ideas are very welcome, see
 [Feedback](#feedback).
 

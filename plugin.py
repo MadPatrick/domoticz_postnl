@@ -1,7 +1,7 @@
 """
-<plugin key="PostNL" name="PostNL &amp; DHL Package Tracking" author="patrick" version="1.1.0" externallink="https://github.com/MadPatrick/domoticz_postnl">
+<plugin key="PostNL" name="PostNL &amp; DHL Package Tracking" author="patrick" version="1.1.1" externallink="https://github.com/MadPatrick/domoticz_postnl">
     <description>
-        <h2>PostNL &amp; DHL Package Tracking v1.1.0</h2>
+        <h2>PostNL &amp; DHL Package Tracking v1.1.1</h2>
         <p>Shows incoming and outgoing PostNL and DHL shipments (Track &amp; Trace) from your PostNL and/or My DHL account.</p>
         <p>PostNL part ported from the Toon app <i>postnl</i> (ToonSoftwareCollective) to a Domoticz plugin.</p>
         <h3>Requirements</h3>
@@ -661,12 +661,43 @@ class DHLClient:
         sent = [s for s in (sent_payload if isinstance(sent_payload, list) else [])
                 if (s.get("type") or "outgoing") == "outgoing"]
 
-        receiver = [self.build_entry(p, "receiver") for p in parcels if not p.get("isReturn")]
+        # The same parcel can come back more than once: twice in the parcels list, or a
+        # return label both as an isReturn parcel and as a sent shipment. Keep each parcel
+        # once (first one wins, the parcels list has the richer status).
+        seen = set()
+
+        def unique(items):
+            out = []
+            for it in items:
+                if not isinstance(it, dict):
+                    continue
+                key = self._parcel_key(it)
+                if key:
+                    if key in seen:
+                        self._debug("DHL: skipping duplicate parcel {}".format(key))
+                        continue
+                    seen.add(key)
+                out.append(it)
+            return out
+
+        incoming = unique([p for p in parcels if isinstance(p, dict) and not p.get("isReturn")])
         # A return you ship back (webshop return label) is listed among the incoming parcels
         # with isReturn=true; for this plugin it is something you send, so it goes to "Sent".
-        sender = [self.build_entry(p, "sender") for p in parcels if p.get("isReturn")]
-        sender += [self.build_entry(s, "sender") for s in sent]
+        returns = unique([p for p in parcels if isinstance(p, dict) and p.get("isReturn")])
+        sent = unique(sent)
+
+        receiver = [self.build_entry(p, "receiver") for p in incoming]
+        sender = [self.build_entry(p, "sender") for p in returns + sent]
         return receiver, sender
+
+    @staticmethod
+    def _parcel_key(item):
+        """Identity of a DHL parcel: its barcode (Track & Trace code), else its id."""
+        for field in ("barcode", "parcelId", "id"):
+            value = item.get(field)
+            if value:
+                return str(value).strip().upper()
+        return ""
 
 
 class BasePlugin:
