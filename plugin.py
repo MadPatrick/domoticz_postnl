@@ -1,7 +1,8 @@
 """
 <plugin key="PostNL" name="Package Tracking" author="patrick" version="1.2.0" externallink="https://github.com/MadPatrick/domoticz_postnl">
     <description>
-        <h2>Package Tracking v1.2.0</h2>
+        <h2>Package Tracking</h2>
+        <p><strong>Version:</strong> 1.2.0</p>
         <p>Shows incoming and outgoing PostNL, DHL and DPD shipments (Track &amp; Trace) from your PostNL, My DHL and/or myDPD account.</p>
         <p>PostNL part ported from the Toon app <i>postnl</i> (ToonSoftwareCollective) to a Domoticz plugin.</p>
         <h3>Requirements</h3>
